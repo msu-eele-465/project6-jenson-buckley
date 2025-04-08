@@ -1,4 +1,3 @@
-#include "gpio.h"
 #include "intrinsics.h"
 #include "msp430fr2355.h"
 #include <driverlib.h>
