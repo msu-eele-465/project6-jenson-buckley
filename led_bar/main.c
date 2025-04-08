@@ -1,32 +1,14 @@
 #include "gpio.h"
 #include "intrinsics.h"
-#include "msp430fr2355.h"
+#include "msp430fr2310.h"
 #include <driverlib.h>
 #include <math.h>
 #include <string.h>
 
 //------------------------------------------------SETUP------------------------------------------------
-//-- KEYPAD
+//-- LED BAR
 
-//-- ADC SAMPLING
-
-//-- ADC CODE TO CELCIUS / FAHRENHEIT
-
-//-- SAMPLING TIMER
-
-//-- WINDOWED AVERAGING (x2)
-
-//-- I2C MASTER
-
-//-- RTC (I2C INFO + vars?)
-
-//-- LM92 (I2C INFO + vars?)
-
-//-- PELTIER GPIO CONTROL
-
-//-- LCD
-
-//-- STATE MACHINE
+//-- 2-PIN LOGIC INPUT
 
 //----------------------------------------------END SETUP----------------------------------------------
 
@@ -35,36 +17,14 @@ int main(void) {
     // Stop watchdog timer
     WDT_A_hold(WDT_A_BASE);
 
-    // Set P1.0 LED
-    P1DIR |= BIT0;
-    P1OUT &= ~BIT0;
-
-    // Set P6.6 LED
-    P6DIR |= BIT6;
-    P6OUT &= ~BIT6;
+    // Set P2.0 LED
+    P2DIR |= BIT0;
+    P2OUT &= ~BIT0;
 
     //------------------------------------------------INITIALIZATIONS------------------------------------------------
-    //-- KEYPAD
+    //-- LED BAR
 
-    //-- ADC SAMPLING
-
-    //-- ADC CODE TO CELCIUS / FAHRENHEIT
-
-    //-- SAMPLING TIMER
-
-    //-- WINDOWED AVERAGING (x2)
-
-    //-- I2C MASTER
-
-    //-- RTC (I2C INFO + vars?)
-
-    //-- LM92 (I2C INFO + vars?)
-
-    //-- PELTIER GPIO CONTROL
-
-    //-- LCD
-
-    //-- STATE MACHINE
+    //-- 2-PIN LOGIC INPUT
 
     //----------------------------------------------END INITIALIZATIONS----------------------------------------------
 
@@ -78,9 +38,8 @@ int main(void) {
     //------------------------------------------------STATE MACHINE------------------------------------------------
     while(1)
     {
-        // Toggle LEDs
-        P1OUT ^= BIT0;
-        P6OUT ^= BIT6;
+        // Toggle LED
+        P2OUT ^= BIT0;
 
         // Delay
         for(i=10000; i>0; i--);
@@ -89,26 +48,8 @@ int main(void) {
 }
 
 //------------------------------------------------FUNCTIONS AND ISRS------------------------------------------------
-//-- KEYPAD
+//-- LED BAR
 
-//-- ADC SAMPLING
-
-//-- ADC CODE TO CELCIUS / FAHRENHEIT
-
-//-- SAMPLING TIMER
-
-//-- WINDOWED AVERAGING (x2)
-
-//-- I2C MASTER
-
-//-- RTC (I2C INFO + vars?)
-
-//-- LM92 (I2C INFO + vars?)
-
-//-- PELTIER GPIO CONTROL
-
-//-- LCD
-
-//-- STATE MACHINE
+//-- 2-PIN LOGIC INPUT
 
 //--------------------------------------------END FUNCTIONS AND ISRS--------------------------------------------
