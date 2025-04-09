@@ -54,6 +54,9 @@ int plant_val;                              // readPlant() reads into this value
 char message[] = "off     A:xx.x CN xxxs  P:xx.x C ";   // 33 characters long, 16 first row, 16 top row, \0
 void lcd_init();                        // Initialize the LCD display
 void lcd_display_message(char *str);    // Display a 32 character message
+void updateAmbientTemp(float);          // Update the ambient temperature displayed
+void updatePlantTemp(float);            // Update the plant temperature displayed
+void updateWidowSize(unsigned int);     // updated the window size displayed
 void delay(unsigned int count);                         // INTERNAL
 void lcd_enable_pulse();                                // INTERNAL
 void lcd_write_command(unsigned char cmd);              // INTERNAL
@@ -109,10 +112,10 @@ int main(void) {
     //-- PELTIER GPIO CONTROL
 
     //-- LCD
-    //lcd_init();  
-    //message[14] = 0xB0;                                     // set degree symbol character in first row
-    //message[30] = 0xB0;                                     // set degree symbol character in second row          
-    //lcd_display_message(message);
+    lcd_init();  
+    message[14] = 0xB0;                                     // set degree symbol character in first row
+    message[30] = 0xB0;                                     // set degree symbol character in second row          
+    lcd_display_message(message);
 
     //-- STATE MACHINE
     char key_val = 'X';                                     // value read from keypad - 'X' if no new input read
@@ -147,6 +150,10 @@ int main(void) {
 
             // HEAT
             else if (key_val == 'A') {
+                // TESTING
+                updateAmbientTemp(100.0);
+                updatePlantTemp(-1.0);
+                updateWidowSize(123);
                 // TODO:
                 // drive heat high and cool low
                 // update LCD to display "heat"
@@ -445,34 +452,46 @@ void readPlant() {
 
 //-- LCD
 void updateAmbientTemp(float ave) {
-    unsigned int n = (int) (ave*100);
-    unsigned int tens = n / 1000;
-    unsigned int ones = (n - 1000*tens) / 100;
-    unsigned int tenths = (n-1000*tens-100*ones) / 10;
-    unsigned int hudredths = n-1000*tens-100*ones-10*tenths;
-    message[10] = tens+48;
-    message[11] = ones+48;
-    message[13] = tenths+48;
+    if ((ave>=100.0) | (ave<0.0)) {
+        message[10] = 'x';
+        message[11] = 'x';
+        message[13] = 'x';
+    } else {
+        unsigned int n = (int) (ave*100);
+        unsigned int tens = n / 1000;
+        unsigned int ones = (n - 1000*tens) / 100;
+        unsigned int tenths = (n-1000*tens-100*ones) / 10;
+        unsigned int hudredths = n-1000*tens-100*ones-10*tenths;
+        message[10] = tens+48;
+        message[11] = ones+48;
+        message[13] = tenths+48;
+    }
 }
 
 void updatePlantTemp(float ave) {
-    unsigned int n = (int) (ave*100);
-    unsigned int tens = n / 1000;
-    unsigned int ones = (n - 1000*tens) / 100;
-    unsigned int tenths = (n-1000*tens-100*ones) / 10;
-    unsigned int hudredths = n-1000*tens-100*ones-10*tenths;
-    message[26] = tens+48;
-    message[27] = ones+48;
-    message[29] = tenths+48;
+    if ((ave>=100.0) | (ave<0.0)) {
+        message[10] = 'x';
+        message[11] = 'x';
+        message[13] = 'x';
+    } else {
+        unsigned int n = (int) (ave*100);
+        unsigned int tens = n / 1000;
+        unsigned int ones = (n - 1000*tens) / 100;
+        unsigned int tenths = (n-1000*tens-100*ones) / 10;
+        unsigned int hudredths = n-1000*tens-100*ones-10*tenths;
+        message[26] = tens+48;
+        message[27] = ones+48;
+        message[29] = tenths+48;
+    }
 }
 
 void updateWidowSize(unsigned int n) {
     unsigned int hundreds = n / 100;
     unsigned int tens = (n - 100*hundreds) / 10;
     unsigned int ones = (n-100*hundreds-10*tens);
-    message[28] = hundreds+48;
-    message[29] = tens+48;
-    message[30] = ones+48;
+    message[18] = hundreds+48;
+    message[19] = tens+48;
+    message[20] = ones+48;
 }
 
 
