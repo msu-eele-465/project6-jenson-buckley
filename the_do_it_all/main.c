@@ -235,7 +235,7 @@ int main(void) {
                         lcd_display_message(message);
                         // TODO:
                         // enable control to set point
-                        seconds = 0;                            // reset 5min timer that resets the state
+                        seconds = 0;                                        // reset 5min timer that resets the state
                     } else {
                         memcpy(&message[0], "off     ", 8);
                         lcd_display_message(message);
