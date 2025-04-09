@@ -40,6 +40,7 @@ unsigned int soon_temp_buffer_length = 0;   // holds number of values to be used
 //-- RTC (I2C INFO + vars?)
 char read_rtc_bool = 0;                     // value toggeled so RTC is read every other sampling interrupt (every 1s)
 unsigned int readSeconds();                 // read in seconds value from RTC
+unsigned int seconds = 0;                   // number of seconds elapsed
 
 //-- LM92 (I2C INFO + vars?)
 void readPlant();                           // read value of LM92 using I2C into plant_val
@@ -52,12 +53,13 @@ int plant_val;                              // readPlant() reads into this value
 #define LCD_RW BIT1     // Read/Write
 #define LCD_E  BIT2     // Enable
 #define LCD_DATA P2OUT  // Data bus on Port 1
-char message[] = "off     A:xx.x CN   3s  P:xx.x C ";   // 33 characters long, 16 first row, 16 top row, \0
+char message[] = "off     A:xx.x C03 xxxs P:xx.x C";   // 33 characters long, 16 first row, 16 top row, \0
 void lcd_init();                        // Initialize the LCD display
 void lcd_display_message(char *str);    // Display a 32 character message
 void updateAmbientTemp(float);          // Update the ambient temperature displayed
 void updatePlantTemp(float);            // Update the plant temperature displayed
 void updateWidowSize(unsigned int);     // Updated the window size displayed
+void updateSeconds(unsigned int);       // Update the seconds displayed
 void updateSetPoint(unsigned int);      // Update the set point displayed
 void delay(unsigned int count);                         // INTERNAL
 void lcd_enable_pulse();                                // INTERNAL
@@ -116,8 +118,8 @@ int main(void) {
 
     //-- LCD
     lcd_init();  
-    message[14] = 0xB0;                                     // set degree symbol character in first row
-    message[30] = 0xB0;                                     // set degree symbol character in second row          
+    message[14] = 223;                                     // set degree symbol character in first row
+    message[30] = 223;                                     // set degree symbol character in second row          
     lcd_display_message(message);
 
     //-- STATE MACHINE
@@ -206,7 +208,7 @@ int main(void) {
                 if ((key_val >= '0') & (key_val <= '9')) {
                     soon_temp_buffer_length = soon_temp_buffer_length*10+(key_val-'0');
                 } else if (key_val=='*') {
-                    if ((soon_temp_buffer_length > 0) & (soon_temp_buffer_length < 101)) {    // update length of rolling average
+                    if ((soon_temp_buffer_length > 0) & (soon_temp_buffer_length < 100)) {    // update length of rolling average
                         temp_buffer_length = soon_temp_buffer_length;
                     } else {
                         temp_buffer_length = 3;
@@ -216,8 +218,8 @@ int main(void) {
                     ambient_sensor_avg = 0;                                                 // clear ambient average
                     plant_sensor_avg = 0;                                                   // clear plant average
                     temp_buffer_cur = 0;                                                    // reset counter for values used in average
-                    updateWidowSize(temp_buffer_length);                                    // update window size display
                     memcpy(&message[0], "off     ", 8);                                     // update status display
+                    updateWidowSize(temp_buffer_length);                                    // update window size display
                     updateAmbientTemp(-1.0);                                                // clear ambient temperature display
                     updatePlantTemp(-1.0);                                                  // clear ambient temperature display
                     lcd_display_message(message);                                           // update LCD
@@ -410,16 +412,21 @@ __interrupt void ISR_TB0_CCR0(void)
     // read ambient temperature (analog LM19)
     readAmbient();
 
-    /*
+    
     // read plant temperature (I2C LM92)
-    readPlant();
+    //readPlant();
 
     // read RTC seconds (every other interrupt)
     read_rtc_bool ^= 1;
     if (read_rtc_bool) {
         // TODO: read RTC
+        seconds++;
+        if (seconds > 1000) {
+            seconds = 0;
+        }
+        updateSeconds(seconds);
     }
-    */
+    
 
     // update ambient temperature array       
     int ambient_popped = ambient_sensor_array[temp_buffer_length-1];
@@ -520,9 +527,17 @@ void updateWidowSize(unsigned int n) {
     unsigned int hundreds = n / 100;
     unsigned int tens = (n - 100*hundreds) / 10;
     unsigned int ones = (n-100*hundreds-10*tens);
-    message[18] = hundreds+48;
-    message[19] = tens+48;
-    message[20] = ones+48;
+    message[16] = tens+48;
+    message[17] = ones+48;
+}
+
+void updateSeconds(unsigned int n) {
+    unsigned int hundreds = n / 100;
+    unsigned int tens = (n - 100*hundreds) / 10;
+    unsigned int ones = (n-100*hundreds-10*tens);
+    message[19] = hundreds+48;
+    message[20] = tens+48;
+    message[21] = ones+48;
 }
 
 void updateSetPoint(unsigned int n) {
