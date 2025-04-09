@@ -159,6 +159,7 @@ int main(void) {
                 // HEAT
                 else if (key_val == 'A') {
                     updatePeltier("heat");                  // drive heat high and cool low
+                    seconds = 0;                            // reset 5min timer that resets the state
                     memcpy(&message[0], "heat    ", 8);     // update LCD to display "heat"
                     lcd_display_message(message);           // display message
                 }
@@ -166,6 +167,7 @@ int main(void) {
                 // COOL
                 else if (key_val == 'B') {
                     updatePeltier("cool");                  // drive heat low and cool high
+                    seconds = 0;                            // reset 5min timer that resets the state
                     memcpy(&message[0], "cool    ", 8);     // update LCD to display "cool"
                     lcd_display_message(message);           // display message
                 }
@@ -174,6 +176,7 @@ int main(void) {
                 else if (key_val == 'C') {
                     // TODO:
                     // enable controller with setpoint = ambient reading
+                    seconds = 0;                            // reset 5min timer that resets the state
                     memcpy(&message[0], "match   ", 8);     // update LCD to display "match"
                     lcd_display_message(message);           // display message
                 }
@@ -232,6 +235,7 @@ int main(void) {
                         lcd_display_message(message);
                         // TODO:
                         // enable control to set point
+                        seconds = 0;                            // reset 5min timer that resets the state
                     } else {
                         memcpy(&message[0], "off     ", 8);
                         lcd_display_message(message);
@@ -412,8 +416,11 @@ __interrupt void ISR_TB0_CCR0(void)
     if (read_rtc_bool) {
         // TODO: read RTC
         seconds++;
-        if (seconds > 1000) {
-            seconds = 0;
+        if (seconds > 300) {
+            seconds = 0;                            // reset seconds
+            updatePeltier("off");                   // drive heat and cool pins low
+            memcpy(&message[0], "off     ", 8);     // update LCD to display "off"
+            lcd_display_message(message);           // display message
         }
         updateSeconds(seconds);
     }
