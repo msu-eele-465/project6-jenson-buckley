@@ -33,18 +33,25 @@ char lastKey = 'X';                         // used internally for debouncing
 #define LCD_E  BIT2     // Enable
 #define LCD_DATA P2OUT  // Data bus on Port 1
 char message[] = "LOCKED                          ";    // 33 characters long, 16 first row, 16 top row, \0
-void delay(unsigned int count);
-void lcd_enable_pulse();
-void lcd_write_command(unsigned char cmd);
-void lcd_write_data(unsigned char data);
-void lcd_init();
-void lcd_set_cursor(unsigned char address);
-void lcd_display_string(char *str);
-void lcd_display_message(char *str);
-void lcd_clear();
+void lcd_init();                        // Initialize the LCD display
+void lcd_display_message(char *str);    // Display a 32 character message
+void delay(unsigned int count);                         // INTERNAL
+void lcd_enable_pulse();                                // INTERNAL
+void lcd_write_command(unsigned char cmd);              // INTERNAL
+void lcd_write_data(unsigned char data);                // INTERNAL
+void lcd_set_cursor(unsigned char address);             // INTERNAL
+void lcd_display_string(char *str);                     // INTERNAL
+void lcd_clear();                                       // INTERNAL
 
 //-- STATE MACHINE
-
+// STATE:
+        // 0    Off (D)
+        // 1    Heat (A)
+        // 2    Cool (B)
+        // 3    Match Ambient (C)
+        // 4    Set Window Size (1)
+        // 5    Match Input Temp (2)
+int state = 0;
 //----------------------------------------------END SETUP----------------------------------------------
 
 int main(void) {
@@ -101,9 +108,50 @@ int main(void) {
         P1OUT ^= BIT0;
         P6OUT ^= BIT6;
 
-        // Delay
-        int i;
-        for(i=10000; i>0; i--);
+        key_val = readKeypad();
+        if (key_val != 'X') {
+
+            // OFF
+            if (key_val == 'D') {
+                // drive heat and cool pins low
+                // update LCD to display "off"
+            }
+
+            // HEAT
+            else if (key_val == 'A') {
+                // drive heat high and cool low
+                // update LCD to display "heat"
+            }
+
+            // COOL
+            else if (key_val == 'B') {
+                // drive heat low and cool high
+                // update LCD to display "cool"
+            }
+
+            // MATCH
+            else if (key_val == 'C') {
+                // enable controller with setpoint = ambient reading
+                // update LCD to display "match"
+            }
+
+            // SET WINDOW SIZE
+            else if (key_val == '1') {
+                // drive heat low and cool low
+                // update LCD to display "window"
+                // logic for inputting window size
+                // save with '*'
+            }
+
+            // MATCH SET TEMP
+            else if (key_val == '2') {
+                // drive heat low and cool low
+                // update LCD to display "set-init"
+                // logic for inputting set temperature
+                // save with '*'
+                // update LCD to display "set"
+            }
+        }
     }
     //----------------------------------------------END STATE MACHINE----------------------------------------------
 }
@@ -119,7 +167,7 @@ void setupKeypad() {
     P6OUT &= ~(BIT6 | BIT5 | BIT4);
 
     // rows as inputs pulled down internally on P6.3, P6.2, P6.1, P6.0
-    P6DIR &= ~(BIT3 | BIT2 | BIT1 | BIT0);     // inputs
+    P6DIR &= ~(BIT3 | BIT2 | BIT1 | BIT0);      // inputs
     P6REN |= BIT3 | BIT2 | BIT1 | BIT0;         // internal resistors
 	P6OUT &=~ BIT3 | BIT2 | BIT1 | BIT0;        // pull-downs
 
@@ -221,31 +269,31 @@ void lcd_enable_pulse() {
 }
 
 void lcd_write_command(unsigned char cmd) {
-    P3OUT &= ~LCD_RS;  // RS = 0 for command
-    P3OUT &= ~LCD_RW;  // RW = 0 for write
-    LCD_DATA = cmd;    // Write command to data bus
+    P3OUT &= ~LCD_RS;   // RS = 0 for command
+    P3OUT &= ~LCD_RW;   // RW = 0 for write
+    LCD_DATA = cmd;     // Write command to data bus
     lcd_enable_pulse();
-    delay(1);         // Command execution delay
+    delay(1);           // Command execution delay
 }
 
 void lcd_write_data(unsigned char data) {
-    P3OUT |= LCD_RS;   // RS = 1 for data
-    P3OUT &= ~LCD_RW;  // RW = 0 for write
-    LCD_DATA = data;   // Write data to data bus
+    P3OUT |= LCD_RS;    // RS = 1 for data
+    P3OUT &= ~LCD_RW;   // RW = 0 for write
+    LCD_DATA = data;    // Write data to data bus
     lcd_enable_pulse();
-    delay(1);         // Data write delay
+    delay(1);           // Data write delay
 }
 
 void lcd_init() {
     P3DIR |= LCD_RS | LCD_RW | LCD_E;
-    P2DIR |= 0xFF;   // Set Port 1 as output for data bus
+    P2DIR |= 0xFF;      // Set Port 1 as output for data bus
 
-    delay(50);    // Power-on delay
+    delay(50);          // Power-on delay
 
-    lcd_write_command(0x38); // Function set: 8-bit, 2 lines, 5x8 dots
-    lcd_write_command(0x0C); // Display ON, Cursor OFF
-    lcd_clear();
-    lcd_write_command(0x06); // Entry mode set: Increment cursor
+    lcd_write_command(0x38);    // Function set: 8-bit, 2 lines, 5x8 dots
+    lcd_write_command(0x0C);    // Display ON, Cursor OFF
+    lcd_clear();                // Clear
+    lcd_write_command(0x06);    // Entry mode set: Increment cursor
 }
 
 void lcd_set_cursor(unsigned char address) {
@@ -260,11 +308,11 @@ void lcd_display_string(char *str) {
 }
 
 void lcd_clear(){
-    lcd_write_command(0x01); // Clear display
-    delay(1);             // Delay for clear command
+    lcd_write_command(0x01);    // Clear display
+    delay(1);                   // Delay for clear command
 }
 
-void lcd_display_message(char *str ){ //Untested
+void lcd_display_message(char *str ){   // Write all 32 characters to display - UNTESTED
     int i;
     lcd_set_cursor(0x00);
     for (i=0; i<16; i++){
