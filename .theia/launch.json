@@ -1,4 +1,23 @@
 {
     "version": "0.2.0",
-    "configurations": []
+    "configurations": [
+        {
+            "name": "led_bar",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "led_bar",
+                "resourceId": "/led_bar"
+            }
+        },
+        {
+            "name": "the_do_it_all",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "the_do_it_all",
+                "resourceId": "/the_do_it_all"
+            }
+        }
+    ]
 }
