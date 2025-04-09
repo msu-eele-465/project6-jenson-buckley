@@ -34,7 +34,6 @@ float plant_c = 0.0;                        // LM92 ambient sensor average in ce
 unsigned int temp_buffer_cur = 0;           // number of values used in average (when adc_filled == adc_buffer_length, average is accurate)
 unsigned int temp_buffer_length = 3;        // number of values to  be used in average: can be [1,100]
 unsigned int soon_temp_buffer_length = 0;   // holds number of values to be used in average while user is entering the number
-unsigned int window_tens = 0;               // used to input multiple-digit number for window size
 
 //-- I2C MASTER
 
@@ -58,7 +57,8 @@ void lcd_init();                        // Initialize the LCD display
 void lcd_display_message(char *str);    // Display a 32 character message
 void updateAmbientTemp(float);          // Update the ambient temperature displayed
 void updatePlantTemp(float);            // Update the plant temperature displayed
-void updateWidowSize(unsigned int);     // updated the window size displayed
+void updateWidowSize(unsigned int);     // Updated the window size displayed
+void updateSetPoint(unsigned int);      // Update the set point displayed
 void delay(unsigned int count);                         // INTERNAL
 void lcd_enable_pulse();                                // INTERNAL
 void lcd_write_command(unsigned char cmd);              // INTERNAL
@@ -66,6 +66,10 @@ void lcd_write_data(unsigned char data);                // INTERNAL
 void lcd_set_cursor(unsigned char address);             // INTERNAL
 void lcd_display_string(char *str);                     // INTERNAL
 void lcd_clear();                                       // INTERNAL
+
+//-- TEMPERATURE CONTROL
+int set_temp;                                           // temperature setpoint to control to
+int soon_set_temp;                                      // temporary variable to store setpoint as it is entered
 
 //-- STATE MACHINE
 // STATE:
@@ -198,41 +202,51 @@ int main(void) {
                 }
 
             } else if (state == 1) {
-                    // update window size
-                    if ((key_val >= '0') & (key_val <= '9')) {
-                        soon_temp_buffer_length = soon_temp_buffer_length*10+(key_val-'0');
-                        window_tens++;
-                    } else if (key_val=='*') {
-                        if ((soon_temp_buffer_length > 0) & (soon_temp_buffer_length < 101)) {    // update length of rolling average
-                            temp_buffer_length = soon_temp_buffer_length;
-                        } else {
-                            temp_buffer_length = 3;
-                        }
-                        memset(ambient_sensor_array, 0, sizeof(ambient_sensor_array));          // clear collected values used for ambient average
-                        memset(plant_sensor_array, 0, sizeof(plant_sensor_array));              // clear collected values used for plant average
-                        ambient_sensor_avg = 0;                                                 // clear ambient average
-                        plant_sensor_avg = 0;                                                   // clear plant average
-                        temp_buffer_cur = 0;                                                    // reset counter for values used in average
-                        updateWidowSize(temp_buffer_length);                                    // update window size display
-                        memcpy(&message[0], "off     ", 8);                                     // update status display
-                        updateAmbientTemp(-1.0);                                                // clear ambient temperature display
-                        updatePlantTemp(-1.0);                                                  // clear ambient temperature display
-                        lcd_display_message(message);                                           // update LCD
+                // logic for inputing window size
+                if ((key_val >= '0') & (key_val <= '9')) {
+                    soon_temp_buffer_length = soon_temp_buffer_length*10+(key_val-'0');
+                } else if (key_val=='*') {
+                    if ((soon_temp_buffer_length > 0) & (soon_temp_buffer_length < 101)) {    // update length of rolling average
+                        temp_buffer_length = soon_temp_buffer_length;
+                    } else {
+                        temp_buffer_length = 3;
+                    }
+                    memset(ambient_sensor_array, 0, sizeof(ambient_sensor_array));          // clear collected values used for ambient average
+                    memset(plant_sensor_array, 0, sizeof(plant_sensor_array));              // clear collected values used for plant average
+                    ambient_sensor_avg = 0;                                                 // clear ambient average
+                    plant_sensor_avg = 0;                                                   // clear plant average
+                    temp_buffer_cur = 0;                                                    // reset counter for values used in average
+                    updateWidowSize(temp_buffer_length);                                    // update window size display
+                    memcpy(&message[0], "off     ", 8);                                     // update status display
+                    updateAmbientTemp(-1.0);                                                // clear ambient temperature display
+                    updatePlantTemp(-1.0);                                                  // clear ambient temperature display
+                    lcd_display_message(message);                                           // update LCD
 
-                        // reset state machine
-                        state = 0;              // set state to free
+                    state = 0;              // set state to free
+                    // TODO:
+                    // drive heat and cool pins low
+                }
+            
+            } else if (state == 2) {
+                // logic for inputting set temperature
+                if ((key_val >= '0') & (key_val <= '9')) {
+                    soon_set_temp = soon_set_temp*10+(key_val-'0');
+                } else if (key_val=='*') {
+                    if ((soon_set_temp >= 0) & (soon_set_temp <= 100)) {    // update length of rolling average
+                        set_temp = soon_set_temp;
+                        memcpy(&message[0], "set:    ", 8);
+                        updateSetPoint(set_temp);
+                        lcd_display_message(message);
+                        // TODO:
+                        // enable control to set point
+                    } else {
+                        memcpy(&message[0], "off     ", 8);
+                        lcd_display_message(message);
                         // TODO:
                         // drive heat and cool pins low
                     }
-            
-            } else if (state == 2) {
-                    // logic for inputting set temperature
-                    // save with '*'
-                    // update LCD to display "set"
-                    if (key_val=='*') {
-                        memcpy(&message[0], "set     ", 8);
-                        lcd_display_message(message);
-                    }
+                    state = 0;              // set state to free
+                }
             
             } else {
                 state = 0;
@@ -509,6 +523,15 @@ void updateWidowSize(unsigned int n) {
     message[18] = hundreds+48;
     message[19] = tens+48;
     message[20] = ones+48;
+}
+
+void updateSetPoint(unsigned int n) {
+    unsigned int hundreds = n / 100;
+    unsigned int tens = (n - 100*hundreds) / 10;
+    unsigned int ones = (n-100*hundreds-10*tens);
+    message[4] = hundreds+48;
+    message[5] = tens+48;
+    message[6] = ones+48;
 }
 
 
