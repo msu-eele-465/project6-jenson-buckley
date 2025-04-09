@@ -52,8 +52,6 @@ int plant_val;                              // readPlant() reads into this value
 #define LCD_E  BIT2     // Enable
 #define LCD_DATA P2OUT  // Data bus on Port 1
 char message[] = "off     A:xx.x CN xxxs  P:xx.x C ";   // 33 characters long, 16 first row, 16 top row, \0
-message[14] = 0xB0;                                     // set degree symbol character in first row
-message[30] = 0xB0;                                     // set degree symbol character in second row
 void lcd_init();                        // Initialize the LCD display
 void lcd_display_message(char *str);    // Display a 32 character message
 void delay(unsigned int count);                         // INTERNAL
@@ -93,12 +91,12 @@ int main(void) {
     setupKeypad();
 
     //-- ADC SAMPLING
-    setupADC();
+    //setupADC();
 
     //-- ADC CODE TO CELCIUS / FAHRENHEIT
 
     //-- SAMPLING TIMER
-    setupSampleClock();
+    //setupSampleClock();
 
     //-- WINDOWED AVERAGING (x2)
 
@@ -111,9 +109,13 @@ int main(void) {
     //-- PELTIER GPIO CONTROL
 
     //-- LCD
-    lcd_init();            
+    //lcd_init();  
+    //message[14] = 0xB0;                                     // set degree symbol character in first row
+    //message[30] = 0xB0;                                     // set degree symbol character in second row          
+    //lcd_display_message(message);
 
     //-- STATE MACHINE
+    char key_val = 'X';                                     // value read from keypad - 'X' if no new input read
 
     //----------------------------------------------END INITIALIZATIONS----------------------------------------------
 
@@ -194,7 +196,7 @@ int main(void) {
                     memset(plant_sensor_array, 0, sizeof(plant_sensor_array));              // clear collected values used for plant average
                     ambient_sensor_avg = 0;                                                 // clear ambient average
                     plant_sensor_avg = 0;                                                   // clear plant average
-                    adc_filled = 0;                                                         // reset counter for values used in average
+                    temp_buffer_cur = 0;                                                    // reset counter for values used in average
                     updateWidowSize(temp_buffer_length);                                    // update window size display
                     
                     // reset state machine
@@ -235,7 +237,7 @@ void setupKeypad() {
     // rows as inputs pulled down internally on P6.3, P6.2, P6.1, P6.0
     P6DIR &= ~(BIT3 | BIT2 | BIT1 | BIT0);      // inputs
     P6REN |= BIT3 | BIT2 | BIT1 | BIT0;         // internal resistors
-	P6OUT &=~ BIT3 | BIT2 | BIT1 | BIT0;        // pull-downs
+	P6OUT &= ~(BIT3 | BIT2 | BIT1 | BIT0);        // pull-downs
 
 }
 
@@ -393,7 +395,6 @@ __interrupt void ISR_TB0_CCR0(void)
 
     // update plant temperature array       
     int plant_popped = plant_sensor_array[temp_buffer_length-1];
-    int i;
     for (i=temp_buffer_length-1; i>0; i--) {
         plant_sensor_array[i] = plant_sensor_array[i-1];
     }
@@ -408,10 +409,10 @@ __interrupt void ISR_TB0_CCR0(void)
         temp_buffer_cur++;
     } else {
         // convert ambient to celcius and update message
-        ambient_c = adc2c(ambient_sensor_avg);
+        float ambient_c = adc2c(ambient_sensor_avg);
         updateAmbientTemp(ambient_c);
         // convert plant to celcius
-        plant_c = adc2c(plant_sensor_avg)
+        float plant_c = adc2c(plant_sensor_avg);
         updatePlantTemp(plant_c);
     }
 
@@ -430,7 +431,7 @@ __interrupt void ISR_TB0_CCR0(void)
 // TODO:
 unsigned int readSeconds() {
     // read in seconds value from RTC
-    return;
+    return 0;
 }
 
 //-- LM92 (I2C INFO + vars?)
@@ -464,6 +465,16 @@ void updatePlantTemp(float ave) {
     message[27] = ones+48;
     message[29] = tenths+48;
 }
+
+void updateWidowSize(unsigned int n) {
+    unsigned int hundreds = n / 100;
+    unsigned int tens = (n - 100*hundreds) / 10;
+    unsigned int ones = (n-100*hundreds-10*tens);
+    message[28] = hundreds+48;
+    message[29] = tens+48;
+    message[30] = ones+48;
+}
+
 
 void delay(unsigned int count) {
     while(count--) __delay_cycles(1000);
