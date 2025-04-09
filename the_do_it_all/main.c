@@ -25,10 +25,12 @@ float twoscomp2c(int);                      // convert 2s compliment to celcius 
 void setupSampleClock();                    // setup clock on TB3 to sample ADC every 0.5s
 
 //-- WINDOWED AVERAGING (x2)
-unsigned int ambient_sensor_array[100];     // array to store ambient LM19 values (ADC code) used to calculate average
-unsigned int plant_sensor_array[100];       // array to store plant LM92 values (converted 2s compliment) used to calculate average
-unsigned int ambient_sensor_avg = 0;        // LM19 ambinet sensor average in ADC code
-unsigned int plant_sensor_avg = 0;          // LM92 plant sensor average in ADC code
+int ambient_sensor_array[100];     // array to store ambient LM19 values (ADC code) used to calculate average
+int plant_sensor_array[100];       // array to store plant LM92 values (converted 2s compliment) used to calculate average
+int ambient_sensor_avg = 0;        // LM19 ambinet sensor average in ADC code
+int plant_sensor_avg = 0;          // LM92 plant sensor average in ADC code
+float ambient_c = 0.0;                      // LM19 ambient sensor average in celcius
+float plant_c = 0.0;                        // LM92 ambient sensor average in celcius
 unsigned int temp_buffer_cur = 0;           // number of values used in average (when adc_filled == adc_buffer_length, average is accurate)
 unsigned int temp_buffer_length = 3;        // number of values to  be used in average: can be [1,100]
 unsigned int soon_temp_buffer_length = 0;   // holds number of values to be used in average while user is entering the number
@@ -51,7 +53,7 @@ int plant_val;                              // readPlant() reads into this value
 #define LCD_RW BIT1     // Read/Write
 #define LCD_E  BIT2     // Enable
 #define LCD_DATA P2OUT  // Data bus on Port 1
-char message[] = "off     A:xx.x CN xxxs  P:xx.x C ";   // 33 characters long, 16 first row, 16 top row, \0
+char message[] = "off     A:xx.x CN   3s  P:xx.x C ";   // 33 characters long, 16 first row, 16 top row, \0
 void lcd_init();                        // Initialize the LCD display
 void lcd_display_message(char *str);    // Display a 32 character message
 void updateAmbientTemp(float);          // Update the ambient temperature displayed
@@ -67,12 +69,9 @@ void lcd_clear();                                       // INTERNAL
 
 //-- STATE MACHINE
 // STATE:
-        // 0    Off (D)
-        // 1    Heat (A)
-        // 2    Cool (B)
-        // 3    Match Ambient (C)
-        // 4    Set Window Size (1)
-        // 5    Match Input Temp (2)
+        // 0    Free (can press any button)
+        // 1    Set Window Size (1)
+        // 2    Match Input Temp (2)
 int state = 0;
 //----------------------------------------------END SETUP----------------------------------------------
 
@@ -94,12 +93,12 @@ int main(void) {
     setupKeypad();
 
     //-- ADC SAMPLING
-    //setupADC();
+    setupADC();
 
     //-- ADC CODE TO CELCIUS / FAHRENHEIT
 
     //-- SAMPLING TIMER
-    //setupSampleClock();
+    setupSampleClock();
 
     //-- WINDOWED AVERAGING (x2)
 
@@ -140,91 +139,105 @@ int main(void) {
         if (key_val != 'X') {
 
             // OFF
-            if (key_val == 'D') {
-                // TODO:
-                // drive heat and cool pins low
-                // update LCD to display "off"
-                memcpy(&message[0], "off     ", 8);
-                lcd_display_message(message);
-            }
-
-            // HEAT
-            else if (key_val == 'A') {
-                // TESTING
-                updateAmbientTemp(100.0);
-                updatePlantTemp(-1.0);
-                updateWidowSize(123);
-                // TODO:
-                // drive heat high and cool low
-                // update LCD to display "heat"
-                memcpy(&message[0], "heat    ", 8);
-                lcd_display_message(message);
-            }
-
-            // COOL
-            else if (key_val == 'B') {
-                // TODO:
-                // drive heat low and cool high
-                // update LCD to display "cool"
-                memcpy(&message[0], "cool    ", 8);
-                lcd_display_message(message);
-            }
-
-            // MATCH
-            else if (key_val == 'C') {
-                // TODO:
-                // enable controller with setpoint = ambient reading
-                // update LCD to display "match"
-                memcpy(&message[0], "match   ", 8);
-                lcd_display_message(message);
-            }
-
-            // SET WINDOW SIZE
-            else if (key_val == '1') {
-                // TODO:
-                // drive heat low and cool low
-                // update LCD to display "window"
-                memcpy(&message[0], "window  ", 8);
-                lcd_display_message(message);
-                // logic for inputting window size
-                // save with '*'
-
-                // update window size
-                if ((key_val >= '0') & (key_val <= '9')) {
-                    soon_temp_buffer_length = soon_temp_buffer_length*10+(key_val-'0');
-                    window_tens++;
-                } else if (key_val=='*') {
-                    if ((soon_temp_buffer_length > 0) & (soon_temp_buffer_length < 101)) {    // update length of rolling average
-                        temp_buffer_length = soon_temp_buffer_length;
-                    } else {
-                        temp_buffer_length = 3;
-                    }
-                    memset(ambient_sensor_array, 0, sizeof(ambient_sensor_array));          // clear collected values used for ambient average
-                    memset(plant_sensor_array, 0, sizeof(plant_sensor_array));              // clear collected values used for plant average
-                    ambient_sensor_avg = 0;                                                 // clear ambient average
-                    plant_sensor_avg = 0;                                                   // clear plant average
-                    temp_buffer_cur = 0;                                                    // reset counter for values used in average
-                    updateWidowSize(temp_buffer_length);                                    // update window size display
-                    
-                    // reset state machine
-                    state = 0;              // set state to OFF
+            if (state == 0) {
+                if (key_val == 'D') {
                     // TODO:
                     // drive heat and cool pins low
                     // update LCD to display "off"
+                    memcpy(&message[0], "off     ", 8);
+                    lcd_display_message(message);
                 }
-            }
 
-            // MATCH SET TEMP
-            else if (key_val == '2') {
+                // HEAT
+                else if (key_val == 'A') {
+                    // TODO:
+                    // drive heat high and cool low
+                    // update LCD to display "heat"
+                    memcpy(&message[0], "heat    ", 8);
+                    lcd_display_message(message);
+                }
+
+                // COOL
+                else if (key_val == 'B') {
+                    // TODO:
+                    // drive heat low and cool high
+                    // update LCD to display "cool"
+                    memcpy(&message[0], "cool    ", 8);
+                    lcd_display_message(message);
+                }
+
+                // MATCH
+                else if (key_val == 'C') {
+                    // TODO:
+                    // enable controller with setpoint = ambient reading
+                    // update LCD to display "match"
+                    memcpy(&message[0], "match   ", 8);
+                    lcd_display_message(message);
+                }
+
+                // SET WINDOW SIZE
+                else if (key_val == '1') {
+                    state = 1;
+                    // TODO:
+                    // drive heat low and cool low
+                    // update LCD to display "window"
+                    memcpy(&message[0], "window  ", 8);
+                    lcd_display_message(message);
+
+                    // reset temorary storage for buffer length
+                    soon_temp_buffer_length = 0;
+                }
+
+                // MATCH SET TEMP
+                else if (key_val == '2') {
+                    state = 2;
+                    // drive heat low and cool low
+                    // update LCD to display "set-init"
+                    memcpy(&message[0], "set-init", 8);
+                    lcd_display_message(message);
+                }
+
+            } else if (state == 1) {
+                    // update window size
+                    if ((key_val >= '0') & (key_val <= '9')) {
+                        soon_temp_buffer_length = soon_temp_buffer_length*10+(key_val-'0');
+                        window_tens++;
+                    } else if (key_val=='*') {
+                        if ((soon_temp_buffer_length > 0) & (soon_temp_buffer_length < 101)) {    // update length of rolling average
+                            temp_buffer_length = soon_temp_buffer_length;
+                        } else {
+                            temp_buffer_length = 3;
+                        }
+                        memset(ambient_sensor_array, 0, sizeof(ambient_sensor_array));          // clear collected values used for ambient average
+                        memset(plant_sensor_array, 0, sizeof(plant_sensor_array));              // clear collected values used for plant average
+                        ambient_sensor_avg = 0;                                                 // clear ambient average
+                        plant_sensor_avg = 0;                                                   // clear plant average
+                        temp_buffer_cur = 0;                                                    // reset counter for values used in average
+                        updateWidowSize(temp_buffer_length);                                    // update window size display
+                        memcpy(&message[0], "off     ", 8);                                     // update status display
+                        updateAmbientTemp(-1.0);                                                // clear ambient temperature display
+                        updatePlantTemp(-1.0);                                                  // clear ambient temperature display
+                        lcd_display_message(message);                                           // update LCD
+
+                        // reset state machine
+                        state = 0;              // set state to free
+                        // TODO:
+                        // drive heat and cool pins low
+                    }
+            
+            } else if (state == 2) {
+                    // logic for inputting set temperature
+                    // save with '*'
+                    // update LCD to display "set"
+                    if (key_val=='*') {
+                        memcpy(&message[0], "set     ", 8);
+                        lcd_display_message(message);
+                    }
+            
+            } else {
+                state = 0;
+                // TODO:
                 // drive heat low and cool low
-                // update LCD to display "set-init"
-                memcpy(&message[0], "set-init", 8);
-                lcd_display_message(message);
-                // logic for inputting set temperature
-                // save with '*'
-                // update LCD to display "set"
-                memcpy(&message[0], "set     ", 8);
-                lcd_display_message(message);
             }
         }
     }
@@ -383,6 +396,7 @@ __interrupt void ISR_TB0_CCR0(void)
     // read ambient temperature (analog LM19)
     readAmbient();
 
+    /*
     // read plant temperature (I2C LM92)
     readPlant();
 
@@ -391,6 +405,7 @@ __interrupt void ISR_TB0_CCR0(void)
     if (read_rtc_bool) {
         // TODO: read RTC
     }
+    */
 
     // update ambient temperature array       
     int ambient_popped = ambient_sensor_array[temp_buffer_length-1];
@@ -400,27 +415,29 @@ __interrupt void ISR_TB0_CCR0(void)
     }
     ambient_sensor_array[0] = ambient_val;
 
+    /*
     // update plant temperature array       
     int plant_popped = plant_sensor_array[temp_buffer_length-1];
     for (i=temp_buffer_length-1; i>0; i--) {
         plant_sensor_array[i] = plant_sensor_array[i-1];
     }
     plant_sensor_array[0] = plant_val;
+    */
 
     // update averages with cool move
-    ambient_sensor_avg += (ambient_val-ambient_popped)/temp_buffer_length;
-    plant_sensor_avg += (plant_val-plant_popped)/temp_buffer_length;
+    ambient_sensor_avg += (ambient_val-ambient_popped) / (int) temp_buffer_length;
+    //plant_sensor_avg += (plant_val-plant_popped)/temp_buffer_length;
 
     // keep track of how many values have been read for average
     if (temp_buffer_cur < temp_buffer_length) {
         temp_buffer_cur++;
     } else {
         // convert ambient to celcius and update message
-        float ambient_c = adc2c(ambient_sensor_avg);
+        ambient_c = adc2c(ambient_sensor_avg);
         updateAmbientTemp(ambient_c);
         // convert plant to celcius
-        float plant_c = adc2c(plant_sensor_avg);
-        updatePlantTemp(plant_c);
+        //plant_c = adc2c(plant_sensor_avg);
+        //updatePlantTemp(plant_c);
     }
 
     // update LCD
