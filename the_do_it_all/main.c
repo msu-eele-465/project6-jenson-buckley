@@ -12,18 +12,37 @@ int checkCols();                            // ussed internally by readKeypad()
 char lastKey = 'X';                         // used internally for debouncing
 
 //-- ADC SAMPLING
+void setupADC();                            // init ADC on P5.2
+void readAmbient();                         // read value of LM19 using ADC into ambient_val
+int ambient_val;                            // ADC code updated in ADC ISR
 
-//-- ADC CODE TO CELCIUS / FAHRENHEIT
+//-- CONVERSIONS
+#define ADC_SCALER (3.3 / 4095.0)           // 3.3V / 2^12 - 1
+float adc2c(int);                           // convert ADC code to celcius temerature value for LM19
+float twoscomp2c(int);                      // convert 2s compliment to celcius temerature value for LM92
 
 //-- SAMPLING TIMER
+void setupSampleClock();                    // setup clock on TB3 to sample ADC every 0.5s
 
 //-- WINDOWED AVERAGING (x2)
+unsigned int ambient_sensor_array[100];     // array to store ambient LM19 values (ADC code) used to calculate average
+unsigned int plant_sensor_array[100];       // array to store plant LM92 values (converted 2s compliment) used to calculate average
+unsigned int ambient_sensor_avg = 0;        // LM19 ambinet sensor average in ADC code
+unsigned int plant_sensor_avg = 0;          // LM92 plant sensor average in ADC code
+unsigned int temp_buffer_cur = 0;           // number of values used in average (when adc_filled == adc_buffer_length, average is accurate)
+unsigned int temp_buffer_length = 3;        // number of values to  be used in average: can be [1,100]
+unsigned int soon_temp_buffer_length = 0;   // holds number of values to be used in average while user is entering the number
+unsigned int window_tens = 0;               // used to input multiple-digit number for window size
 
 //-- I2C MASTER
 
 //-- RTC (I2C INFO + vars?)
+char read_rtc_bool = 0;                     // value toggeled so RTC is read every other sampling interrupt (every 1s)
+unsigned int readSeconds();                 // read in seconds value from RTC
 
 //-- LM92 (I2C INFO + vars?)
+void readPlant();                           // read value of LM92 using I2C into plant_val
+int plant_val;                              // readPlant() reads into this value
 
 //-- PELTIER GPIO CONTROL
 
@@ -32,7 +51,9 @@ char lastKey = 'X';                         // used internally for debouncing
 #define LCD_RW BIT1     // Read/Write
 #define LCD_E  BIT2     // Enable
 #define LCD_DATA P2OUT  // Data bus on Port 1
-char message[] = "LOCKED                          ";    // 33 characters long, 16 first row, 16 top row, \0
+char message[] = "off     A:xx.x CN xxxs  P:xx.x C ";   // 33 characters long, 16 first row, 16 top row, \0
+message[14] = 0xB0;                                     // set degree symbol character in first row
+message[30] = 0xB0;                                     // set degree symbol character in second row
 void lcd_init();                        // Initialize the LCD display
 void lcd_display_message(char *str);    // Display a 32 character message
 void delay(unsigned int count);                         // INTERNAL
@@ -72,10 +93,12 @@ int main(void) {
     setupKeypad();
 
     //-- ADC SAMPLING
+    setupADC();
 
     //-- ADC CODE TO CELCIUS / FAHRENHEIT
 
     //-- SAMPLING TIMER
+    setupSampleClock();
 
     //-- WINDOWED AVERAGING (x2)
 
@@ -113,43 +136,86 @@ int main(void) {
 
             // OFF
             if (key_val == 'D') {
+                // TODO:
                 // drive heat and cool pins low
                 // update LCD to display "off"
+                memcpy(&message[0], "off     ", 8);
+                lcd_display_message(message);
             }
 
             // HEAT
             else if (key_val == 'A') {
+                // TODO:
                 // drive heat high and cool low
                 // update LCD to display "heat"
+                memcpy(&message[0], "heat    ", 8);
+                lcd_display_message(message);
             }
 
             // COOL
             else if (key_val == 'B') {
+                // TODO:
                 // drive heat low and cool high
                 // update LCD to display "cool"
+                memcpy(&message[0], "cool    ", 8);
+                lcd_display_message(message);
             }
 
             // MATCH
             else if (key_val == 'C') {
+                // TODO:
                 // enable controller with setpoint = ambient reading
                 // update LCD to display "match"
+                memcpy(&message[0], "match   ", 8);
+                lcd_display_message(message);
             }
 
             // SET WINDOW SIZE
             else if (key_val == '1') {
+                // TODO:
                 // drive heat low and cool low
                 // update LCD to display "window"
+                memcpy(&message[0], "window  ", 8);
+                lcd_display_message(message);
                 // logic for inputting window size
                 // save with '*'
+
+                // update window size
+                if ((key_val >= '0') & (key_val <= '9')) {
+                    soon_temp_buffer_length = soon_temp_buffer_length*10+(key_val-'0');
+                    window_tens++;
+                } else if (key_val=='*') {
+                    if ((soon_temp_buffer_length > 0) & (soon_temp_buffer_length < 101)) {    // update length of rolling average
+                        temp_buffer_length = soon_temp_buffer_length;
+                    } else {
+                        temp_buffer_length = 3;
+                    }
+                    memset(ambient_sensor_array, 0, sizeof(ambient_sensor_array));          // clear collected values used for ambient average
+                    memset(plant_sensor_array, 0, sizeof(plant_sensor_array));              // clear collected values used for plant average
+                    ambient_sensor_avg = 0;                                                 // clear ambient average
+                    plant_sensor_avg = 0;                                                   // clear plant average
+                    adc_filled = 0;                                                         // reset counter for values used in average
+                    updateWidowSize(temp_buffer_length);                                    // update window size display
+                    
+                    // reset state machine
+                    state = 0;              // set state to OFF
+                    // TODO:
+                    // drive heat and cool pins low
+                    // update LCD to display "off"
+                }
             }
 
             // MATCH SET TEMP
             else if (key_val == '2') {
                 // drive heat low and cool low
                 // update LCD to display "set-init"
+                memcpy(&message[0], "set-init", 8);
+                lcd_display_message(message);
                 // logic for inputting set temperature
                 // save with '*'
                 // update LCD to display "set"
+                memcpy(&message[0], "set     ", 8);
+                lcd_display_message(message);
             }
         }
     }
@@ -242,22 +308,163 @@ int checkCols() {
 }
 
 //-- ADC SAMPLING
+void setupADC() {
+    // Configure ADC A10 pin on P5.2
+    P5SEL0 |= BIT2;
+    P5SEL1 |= BIT2;
 
-//-- ADC CODE TO CELCIUS / FAHRENHEIT
+    // Configure ADC12
+    ADCCTL0 |= ADCSHT_2 | ADCON;                             // ADCON, S&H=16 ADC clks
+    ADCCTL1 |= ADCSHP;                                       // ADCCLK = MODOSC; sampling timer
+    ADCCTL2 &= ~ADCRES;                                      // clear ADCRES in ADCCTL
+    ADCCTL2 |= ADCRES_2;                                     // 12-bit conversion results
+    ADCMCTL0 |= ADCINCH_10;                                   // A10 ADC input select; Vref=AVCC
+    ADCIE |= ADCIE0;                                         // Enable ADC conv complete interrupt
+}
+
+
+void readAmbient() {
+    // start sampling and conversion
+    ADCCTL0 |= ADCENC | ADCSC;
+}
+
+#pragma vector=ADC_VECTOR
+__interrupt void ADC_ISR(void)
+{
+    switch(ADCIV)
+    {
+        case ADCIV_ADCIFG:
+            ambient_val = ADCMEM0;
+            break;
+        default:
+            break;
+    }
+}
+
+//-- CONVERSIONS
+float adc2c(int code) {
+    // 12-bit adc conversion with 3.3V reference
+    float voltage = ((float) code) * ADC_SCALER;
+    // Vo to C conversion from LM19 datasheet
+    float celcius = -1481.96 + sqrt(2.1962e6 + (1.8639 - voltage) / (3.88e-6));
+    return celcius;
+}
+
+float twoscomp2c(int twos) {
+    // check for sign, extending as needed
+    if(twos & (1 <<12)) {
+        twos |= 0xFFFFE000;
+    }
+    // LSB is 0.0625 degC
+    return ((float) twos) * 0.0625;
+}
 
 //-- SAMPLING TIMER
+void setupSampleClock() {
+    TB3CTL |= TBCLR;                            // reset settings
+    TB3CTL |= TBSSEL__ACLK | MC__UP | ID__8;    // 32.768 kHz / 8 = 4096 / 2 - 1 = 2047
+    TB3CCR0 = 2047;                             // period of .5s
+    TB3CCTL0 |= CCIE;                           // Enable capture compare
+    TB3CCTL0 &= ~CCIFG;                         // Clear IFG
+}
+
+#pragma vector = TIMER3_B0_VECTOR
+__interrupt void ISR_TB0_CCR0(void)
+{
+    // read ambient temperature (analog LM19)
+    readAmbient();
+
+    // read plant temperature (I2C LM92)
+    readPlant();
+
+    // read RTC seconds (every other interrupt)
+    read_rtc_bool ^= 1;
+    if (read_rtc_bool) {
+        // TODO: read RTC
+    }
+
+    // update ambient temperature array       
+    int ambient_popped = ambient_sensor_array[temp_buffer_length-1];
+    int i;
+    for (i=temp_buffer_length-1; i>0; i--) {
+        ambient_sensor_array[i] = ambient_sensor_array[i-1];
+    }
+    ambient_sensor_array[0] = ambient_val;
+
+    // update plant temperature array       
+    int plant_popped = plant_sensor_array[temp_buffer_length-1];
+    int i;
+    for (i=temp_buffer_length-1; i>0; i--) {
+        plant_sensor_array[i] = plant_sensor_array[i-1];
+    }
+    plant_sensor_array[0] = plant_val;
+
+    // update averages with cool move
+    ambient_sensor_avg += (ambient_val-ambient_popped)/temp_buffer_length;
+    plant_sensor_avg += (plant_val-plant_popped)/temp_buffer_length;
+
+    // keep track of how many values have been read for average
+    if (temp_buffer_cur < temp_buffer_length) {
+        temp_buffer_cur++;
+    } else {
+        // convert ambient to celcius and update message
+        ambient_c = adc2c(ambient_sensor_avg);
+        updateAmbientTemp(ambient_c);
+        // convert plant to celcius
+        plant_c = adc2c(plant_sensor_avg)
+        updatePlantTemp(plant_c);
+    }
+
+    // update LCD
+    lcd_display_message(message);
+
+    // clear CCR0 IFG
+    TB3CCTL0 &= ~CCIFG;
+}
 
 //-- WINDOWED AVERAGING (x2)
 
 //-- I2C MASTER
 
 //-- RTC (I2C INFO + vars?)
+// TODO:
+unsigned int readSeconds() {
+    // read in seconds value from RTC
+    return;
+}
 
 //-- LM92 (I2C INFO + vars?)
+// TODO:
+void readPlant() {
+    // read value of LM92 using I2C into plant_val
+    return;
+}
 
 //-- PELTIER GPIO CONTROL
 
 //-- LCD
+void updateAmbientTemp(float ave) {
+    unsigned int n = (int) (ave*100);
+    unsigned int tens = n / 1000;
+    unsigned int ones = (n - 1000*tens) / 100;
+    unsigned int tenths = (n-1000*tens-100*ones) / 10;
+    unsigned int hudredths = n-1000*tens-100*ones-10*tenths;
+    message[10] = tens+48;
+    message[11] = ones+48;
+    message[13] = tenths+48;
+}
+
+void updatePlantTemp(float ave) {
+    unsigned int n = (int) (ave*100);
+    unsigned int tens = n / 1000;
+    unsigned int ones = (n - 1000*tens) / 100;
+    unsigned int tenths = (n-1000*tens-100*ones) / 10;
+    unsigned int hudredths = n-1000*tens-100*ones-10*tenths;
+    message[26] = tens+48;
+    message[27] = ones+48;
+    message[29] = tenths+48;
+}
+
 void delay(unsigned int count) {
     while(count--) __delay_cycles(1000);
 }
