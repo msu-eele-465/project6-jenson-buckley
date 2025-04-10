@@ -56,13 +56,13 @@ void updatePeltier(char *str);              // Update the state of the plant ("o
 #define LCD_E  BIT2     // Enable
 #define LCD_DATA P2OUT  // Data bus on Port 1
 char message[] = "off     A:xx.x C03 xxxs P:xx.x C";   // 33 characters long, 16 first row, 16 top row, \0
-void lcd_init();                        // Initialize the LCD display
-void lcd_display_message(char *str);    // Display a 32 character message
-void updateAmbientTemp(float);          // Update the ambient temperature displayed
-void updatePlantTemp(float);            // Update the plant temperature displayed
-void updateWidowSize(unsigned int);     // Updated the window size displayed
-void updateSeconds(unsigned int);       // Update the seconds displayed
-void updateSetPoint(unsigned int);      // Update the set point displayed
+void lcd_init();                            // Initialize the LCD display
+void lcd_display_message(char *str);        // Display a 32 character message
+void updateAmbientTemp(float);              // Update the ambient temperature displayed
+void updatePlantTemp(float);                // Update the plant temperature displayed
+void updateWidowSize(unsigned int);         // Updated the window size displayed
+void updateSeconds(unsigned int);           // Update the seconds displayed
+void updateSetPoint(unsigned int);          // Update the set point displayed
 void delay(unsigned int count);                         // INTERNAL
 void lcd_enable_pulse();                                // INTERNAL
 void lcd_write_command(unsigned char cmd);              // INTERNAL
@@ -72,8 +72,10 @@ void lcd_display_string(char *str);                     // INTERNAL
 void lcd_clear();                                       // INTERNAL
 
 //-- TEMPERATURE CONTROL
-int set_temp;                                           // temperature setpoint to control to
-int soon_set_temp;                                      // temporary variable to store setpoint as it is entered
+int set_temp;                               // temperature setpoint to control to
+int soon_set_temp;                          // temporary variable to store setpoint as it is entered
+int bang_bang_bool = 0;                     // Control whether bang-bang control is active (1) or off (0)
+int ambient_bool = 0;                       // Control whether set point is ambient (1) or user-set (0)
 
 //-- STATE MACHINE
 // STATE:
@@ -152,6 +154,7 @@ int main(void) {
             if (state == 0) {
                 if (key_val == 'D') {
                     updatePeltier("off");                   // drive heat and cool pins low
+                    bang_bang_bool = 0;                     // disable bang-bang control
                     memcpy(&message[0], "off     ", 8);     // update LCD to display "off"
                     lcd_display_message(message);           // display message
                 }
@@ -174,8 +177,8 @@ int main(void) {
 
                 // MATCH
                 else if (key_val == 'C') {
-                    // TODO:
-                    // enable controller with setpoint = ambient reading
+                    bang_bang_bool = 1;                     // enable bang-bang control
+                    ambient_bool = 1;                       // setpoint is ambient temperature
                     seconds = 0;                            // reset 5min timer that resets the state
                     memcpy(&message[0], "match   ", 8);     // update LCD to display "match"
                     lcd_display_message(message);           // display message
@@ -185,6 +188,7 @@ int main(void) {
                 else if (key_val == '1') {
                     state = 1;                              // update state to input window size
                     updatePeltier("off");                   // drive heat low and cool low
+                    bang_bang_bool = 0;                     // disable bang-bang control
                     memcpy(&message[0], "window  ", 8);     // update LCD to display "window"
                     lcd_display_message(message);           // display message
                     soon_temp_buffer_length = 0;            // reset temorary storage for buffer length
@@ -194,9 +198,10 @@ int main(void) {
                 else if (key_val == '2') {
                     state = 2;                              // update state to input set point
                     updatePeltier("off");                   // drive heat low and cool low
+                    bang_bang_bool = 0;                     // disable bang-bang control
                     memcpy(&message[0], "set-init", 8);     // update LCD to display "set-init"
                     lcd_display_message(message);           // display message
-                    soon_set_temp = 0;            // reset temorary storage for set temperature
+                    soon_set_temp = 0;                      // reset temorary storage for set temperature
                 }
 
             } else if (state == 1) {
@@ -222,6 +227,7 @@ int main(void) {
 
                     state = 0;              // set state to free
                     updatePeltier("off");   // drive heat and cool pins low
+                    bang_bang_bool = 0;                     // disable bang-bang control
                 }
             
             } else if (state == 2) {
@@ -234,14 +240,14 @@ int main(void) {
                         memcpy(&message[0], "set:    ", 8);
                         updateSetPoint(set_temp);
                         lcd_display_message(message);
-                        // TODO:
-                        // enable control to set point
+                        bang_bang_bool = 1;                                 // enable bang-bang control
+                        ambient_bool = 0;                                   // setpoint is user-set temperature
                         seconds = 0;                                        // reset 5min timer that resets the state
                     } else {
                         memcpy(&message[0], "off     ", 8);
                         lcd_display_message(message);
-                        // TODO:
-                        // drive heat and cool pins low
+                        updatePeltier("off");                               // disable peltier
+                        bang_bang_bool = 0;                     // disable bang-bang control
                     }
                     state = 0;              // set state to free
                 }
@@ -407,7 +413,6 @@ __interrupt void ISR_TB0_CCR0(void)
 {
     // read ambient temperature (analog LM19)
     readAmbient();
-
     
     // read plant temperature (I2C LM92)
     //readPlant();
@@ -420,12 +425,12 @@ __interrupt void ISR_TB0_CCR0(void)
         if (seconds > 300) {
             seconds = 0;                            // reset seconds
             updatePeltier("off");                   // drive heat and cool pins low
+            bang_bang_bool = 0;                     // disable bang-bang control
             memcpy(&message[0], "off     ", 8);     // update LCD to display "off"
             lcd_display_message(message);           // display message
         }
         updateSeconds(seconds);
     }
-    
 
     // update ambient temperature array       
     int ambient_popped = ambient_sensor_array[temp_buffer_length-1];
@@ -462,6 +467,26 @@ __interrupt void ISR_TB0_CCR0(void)
 
     // update LCD
     lcd_display_message(message);
+
+    // bang-bang control
+    if (bang_bang_bool == 1) {
+        // calculate error
+        float diff;
+        if (ambient_bool == 1) {
+            diff = ambient_c - plant_c;
+        } else {
+            diff = ((float) set_temp) - plant_c;
+        }
+
+        // update peltier
+        if (diff > 0) {
+            updatePeltier("heat");
+        } else if (diff < 0) {
+            updatePeltier("cool");
+        } else {
+            updatePeltier("off");
+        }
+    }
 
     // clear CCR0 IFG
     TB3CCTL0 &= ~CCIFG;
