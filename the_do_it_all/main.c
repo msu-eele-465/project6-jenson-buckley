@@ -196,6 +196,7 @@ int main(void) {
                     updatePeltier("off");                   // drive heat low and cool low
                     memcpy(&message[0], "set-init", 8);     // update LCD to display "set-init"
                     lcd_display_message(message);           // display message
+                    soon_set_temp = 0;            // reset temorary storage for set temperature
                 }
 
             } else if (state == 1) {
