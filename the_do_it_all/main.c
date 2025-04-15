@@ -454,7 +454,7 @@ __interrupt void ISR_TB0_CCR0(void)
 
     // update averages with cool move
     ambient_sensor_avg += (ambient_val-ambient_popped) / (int) temp_buffer_length;
-    plant_sensor_avg += (plant_val-plant_popped)/temp_buffer_length;
+    plant_sensor_avg += (plant_val-plant_popped)/ (int) temp_buffer_length;
 
     // keep track of how many values have been read for average
     if (temp_buffer_cur < temp_buffer_length) {
