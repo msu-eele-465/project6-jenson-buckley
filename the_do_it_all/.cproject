@@ -93,6 +93,7 @@
                     </folderInfo>
                     <sourceEntries>
                         <entry excluding="test/tempSenseTest.c|test/uartTest.c|main.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
+                        <entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
                     </sourceEntries>
                 </configuration>
             </storageModule>
