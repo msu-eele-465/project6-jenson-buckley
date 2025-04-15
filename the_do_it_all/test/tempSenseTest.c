@@ -72,12 +72,13 @@ int main(void) {
         while (UCB1CTLW0 & UCTXSTP);         // Wait for STOP to finish
 
         // Step 2: Read temp
-        UCB1TBCNT = 2;
         rx_byte_count = 0;
-        UCB1CTLW0 &= ~UCTR;                  // RX mode
-        UCB1CTLW0 |= UCTXSTT;                // Generate repeated START
-        while (UCB1CTLW0 & UCTXSTT);         // Wait for it to finish
-        while (UCB1CTLW0 & UCTXSTP);         // Wait for read to complete
+        UCB1TBCNT = 2;                      // Set byte count before starting transaction
+        UCB1CTLW0 &= ~UCTR;                 // RX mode
+        UCB1CTLW0 |= UCTXSTT;               // Generate repeated START
+        while (UCB1CTLW0 & UCTXSTT);        // Wait for START to finish
+        while (!(UCB1IFG & UCSTPIFG));      // Wait for STOP to be generated
+        UCB1IFG &= ~UCSTPIFG;               // Clear STOP flag
 
         temp_raw = (rx_data[0] << 8) | rx_data[1];
 
