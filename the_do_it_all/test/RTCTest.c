@@ -6,18 +6,17 @@
 
 //-- I2C MASTER
 volatile uint8_t rx_byte_count = 0;
-volatile uint8_t rx_data[2];
+volatile uint8_t rx_data[3];
 void setupI2C();
 
-//-- LM92 (I2C INFO + vars?)
-#define LM92_ADDR  0x48 
-volatile uint16_t temp_raw = 0;
+//-- DS3231 (I2C INFO + vars?)
+#define DS3231_ADDR  0x68
 
 //-- UART
 unsigned int position;
-char message[] = "Temp: 00000\n";  
+char message[] = "Time: 00:00:00\n";
 void setupUART(); 
-void printTemp();
+void printTime();
 
 
 //----------------------------------------------END SETUP----------------------------------------------
@@ -63,7 +62,7 @@ int main(void) {
         P1OUT ^= BIT0;
         P6OUT ^= BIT6;
 
-        // Step 1: Set pointer register to 0x00 (temp register)
+        // Step 1: Set pointer register to 0x00 (Seconds Register)
         UCB1CTLW0 |= UCTR | UCTXSTT;         // TX mode, generate START
         while (!(UCB1IFG & UCTXIFG0));       // Wait for TX buffer ready
         UCB1TXBUF = 0x00;                    // Send pointer byte
@@ -71,25 +70,23 @@ int main(void) {
         UCB1CTLW0 |= UCTXSTP;                // Generate STOP
         while (UCB1CTLW0 & UCTXSTP);         // Wait for STOP to finish
 
-        // Step 2: Read temp
-        UCB1TBCNT = 2;
+        // Step 2: Read 3 bytes (HH:MM:SS)
+        UCB1TBCNT = 3;
         rx_byte_count = 0;
         UCB1CTLW0 &= ~UCTR;                  // RX mode
         UCB1CTLW0 |= UCTXSTT;                // Generate repeated START
         while (UCB1CTLW0 & UCTXSTT);         // Wait for it to finish
-        while (UCB1CTLW0 & UCTXSTP);         // Wait for read to complete
+        while (UCB1CTLW0 & UCTXSTP);         // Wait until all 3 bytes received
 
-        temp_raw = (rx_data[0] << 8) | rx_data[1];
+        // Write raw BCD bytes into message (2 hex characters each)
+        message[6]  = "0123456789ABCDEF"[rx_data[2] >> 4];
+        message[7]  = "0123456789ABCDEF"[rx_data[2] & 0x0F];
+        message[9]  = "0123456789ABCDEF"[rx_data[1] >> 4];
+        message[10] = "0123456789ABCDEF"[rx_data[1] & 0x0F];
+        message[12] = "0123456789ABCDEF"[rx_data[0] >> 4];
+        message[13] = "0123456789ABCDEF"[rx_data[0] & 0x0F];
 
-        uint16_t val = temp_raw;
-
-        message[6] = (val / 10000) % 10 + '0';
-        message[7] = (val / 1000) % 10 + '0';
-        message[8] = (val / 100) % 10 + '0';
-        message[9] = (val / 10) % 10 + '0';
-        message[10] = val % 10 + '0';
-        
-        printTemp();
+        printTime();
 
         // Delay
         __delay_cycles(1000000);
@@ -111,8 +108,8 @@ void setupI2C(){
     P4SEL1 &= ~(BIT6 | BIT7);
     P4SEL0 |=  (BIT6 | BIT7);       // SDA=P4.6, SCL=P4.7
 
-    UCB1TBCNT = 2;                  // Expect 2 bytes
-    UCB1I2CSA = LM92_ADDR;          // LM92 address
+    UCB1TBCNT = 3;                  // Expect 2 bytes
+    UCB1I2CSA = DS3231_ADDR;               // LM92 address
 
     UCB1CTLW0 &= ~UCTR;             // RX mode
     UCB1CTLW0 &= ~UCSWRST;
@@ -124,7 +121,7 @@ void setupI2C(){
 __interrupt void EUSCI_B1_ISR(void) {
     switch (__even_in_range(UCB1IV, USCI_I2C_UCBIT9IFG)) {
         case USCI_I2C_UCRXIFG0:
-            if (rx_byte_count < 2) {
+            if (rx_byte_count < 3) {
                 rx_data[rx_byte_count++] = UCB1RXBUF;
             }
             break;
@@ -132,9 +129,6 @@ __interrupt void EUSCI_B1_ISR(void) {
             break;
     }
 }
-
-
-//-- LM92 (I2C INFO + vars?)
 
 //-- UART
 void setupUART(){
@@ -147,7 +141,7 @@ void setupUART(){
     P4SEL0 |= BIT3; 
 }
 
-void printTemp(){
+void printTime(){
     position = 0;
     UCA1IE |= UCTXCPTIE;        // Enable interrupt
     UCA1IFG &=~ UCTXCPTIFG;     // Clear flag
