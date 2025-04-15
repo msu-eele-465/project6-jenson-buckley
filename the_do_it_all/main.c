@@ -36,6 +36,9 @@ unsigned int temp_buffer_length = 3;        // Number of values to  be used in a
 unsigned int soon_temp_buffer_length = 0;   // Holds number of values to be used in average while user is entering the number
 
 //-- I2C MASTER
+volatile uint8_t rx_byte_count = 0;         // Number of bytes received
+volatile uint8_t rx_data[2];                // Array to hold received bytes
+void setupI2C();                            // Setup I2C on P4.6 (SDA) and P4.7 (SCL)
 
 //-- RTC (I2C INFO + vars?)
 char read_rtc_bool = 0;                     // Value toggeled so RTC is read every other sampling interrupt (every 1s)
@@ -43,8 +46,9 @@ unsigned int readSeconds();                 // Read in seconds value from RTC
 unsigned int seconds = 0;                   // Number of seconds elapsed
 
 //-- LM92 (I2C INFO + vars?)
+#define LM92_ADDR  0x48 
 void readPlant();                           // Read value of LM92 using I2C into plant_val
-int plant_val;                              // readPlant() reads into this value
+volatile int plant_val;                     // readPlant() reads into this value
 
 //-- PELTIER GPIO CONTROL
 void setupPeltier();                        // Initializes P4.0 (26 - heat) and P4.1 (25 - cool) as outputs driven low
@@ -113,6 +117,7 @@ int main(void) {
     //-- WINDOWED AVERAGING (x2)
 
     //-- I2C MASTER
+    setupI2C(); 
 
     //-- RTC (I2C INFO + vars?)
 
@@ -392,7 +397,7 @@ float adc2c(int code) {
 
 float twoscomp2c(int twos) {
     // check for sign, extending as needed
-    if(twos & (1 <<12)) {
+    if(twos & (1 << 12)) {
         twos |= 0xFFFFE000;
     }
     // LSB is 0.0625 degC
@@ -415,7 +420,7 @@ __interrupt void ISR_TB0_CCR0(void)
     readAmbient();
     
     // read plant temperature (I2C LM92)
-    //readPlant();
+    readPlant();
 
     // read RTC seconds (every other interrupt)
     read_rtc_bool ^= 1;
@@ -440,18 +445,16 @@ __interrupt void ISR_TB0_CCR0(void)
     }
     ambient_sensor_array[0] = ambient_val;
 
-    /*
     // update plant temperature array       
     int plant_popped = plant_sensor_array[temp_buffer_length-1];
     for (i=temp_buffer_length-1; i>0; i--) {
         plant_sensor_array[i] = plant_sensor_array[i-1];
     }
     plant_sensor_array[0] = plant_val;
-    */
 
     // update averages with cool move
     ambient_sensor_avg += (ambient_val-ambient_popped) / (int) temp_buffer_length;
-    //plant_sensor_avg += (plant_val-plant_popped)/temp_buffer_length;
+    plant_sensor_avg += (plant_val-plant_popped)/temp_buffer_length;
 
     // keep track of how many values have been read for average
     if (temp_buffer_cur < temp_buffer_length) {
@@ -461,8 +464,8 @@ __interrupt void ISR_TB0_CCR0(void)
         ambient_c = adc2c(ambient_sensor_avg);
         updateAmbientTemp(ambient_c);
         // convert plant to celcius
-        //plant_c = adc2c(plant_sensor_avg);
-        //updatePlantTemp(plant_c);
+        plant_c = twoscomp2c(plant_sensor_avg);
+        updatePlantTemp(plant_c);
     }
 
     // update LCD
@@ -495,9 +498,40 @@ __interrupt void ISR_TB0_CCR0(void)
 //-- WINDOWED AVERAGING (x2)
 
 //-- I2C MASTER
+void setupI2C(){
+    UCB1CTLW0 |= UCSWRST;           // Put into software reset
+    UCB1CTLW0 |= UCSSEL__SMCLK;     // Use SMCLK 
+    UCB1BRW = 10;                   // Divide by 10 (100kHz)
+
+    UCB1CTLW0 |= UCMODE_3 | UCMST;  // Master
+    UCB1CTLW1 |= UCASTP_2;          // Autostop on byte count
+
+    P4SEL1 &= ~(BIT6 | BIT7);       // SDA=P4.6, SCL=P4.7
+    P4SEL0 |=  (BIT6 | BIT7);       // SDA=P4.6, SCL=P4.7
+
+    UCB1TBCNT = 2;                  // Expect 2 bytes
+    UCB1I2CSA = LM92_ADDR;          // LM92 address
+
+    UCB1CTLW0 &= ~UCTR;             // RX mode
+    UCB1CTLW0 &= ~UCSWRST;          // Take out of software reset
+
+    UCB1IE |= UCRXIE0;              // Enable RX interrupt
+}
+
+#pragma vector = EUSCI_B1_VECTOR
+__interrupt void EUSCI_B1_ISR(void) {
+    switch (__even_in_range(UCB1IV, USCI_I2C_UCBIT9IFG)) {
+        case USCI_I2C_UCRXIFG0:
+            if (rx_byte_count < 2) {
+                rx_data[rx_byte_count++] = UCB1RXBUF;
+            }
+            break;
+        default:
+            break;
+    }
+}
 
 //-- RTC (I2C INFO + vars?)
-// TODO:
 unsigned int readSeconds() {
     // read in seconds value from RTC
     return 0;
@@ -507,6 +541,25 @@ unsigned int readSeconds() {
 // TODO:
 void readPlant() {
     // read value of LM92 using I2C into plant_val
+    
+    // Step 1: Set pointer register to 0x00 (temp register)
+    UCB1CTLW0 |= UCTR | UCTXSTT;        // TX mode, generate START
+    while (!(UCB1IFG & UCTXIFG0));      // Wait for TX buffer ready
+    UCB1TXBUF = 0x00;                   // Send pointer byte
+    while (!(UCB1IFG & UCTXIFG0));      // Wait for it to finish
+    UCB1CTLW0 |= UCTXSTP;               // Generate STOP
+    while (UCB1CTLW0 & UCTXSTP);        // Wait for STOP to finish
+
+    // Step 2: Read temp
+    UCB1TBCNT = 2;                      // Set number of bytes to receive
+    rx_byte_count = 0;                  // Reset number of bytes received
+    UCB1CTLW0 &= ~UCTR;                 // RX mode
+    UCB1CTLW0 |= UCTXSTT;               // Generate repeated START
+    while (UCB1CTLW0 & UCTXSTT);        // Wait for it to finish
+    while (UCB1CTLW0 & UCTXSTP);        // Wait for read to complete
+
+    plant_val = (rx_data[0] << 5) | (rx_data[1] >> 3);
+
     return;
 }
 
@@ -551,9 +604,9 @@ void updateAmbientTemp(float ave) {
 
 void updatePlantTemp(float ave) {
     if ((ave>=100.0) | (ave<0.0)) {
-        message[10] = 'x';
-        message[11] = 'x';
-        message[13] = 'x';
+        message[26] = 'x';
+        message[27] = 'x';
+        message[29] = 'x';
     } else {
         unsigned int n = (int) (ave*100);
         unsigned int tens = n / 1000;
