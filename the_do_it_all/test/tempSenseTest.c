@@ -1,50 +1,24 @@
-#include "gpio.h"
 #include "intrinsics.h"
 #include "msp430fr2355.h"
-#include <driverlib.h>
-#include <math.h>
-#include <string.h>
+#include <stdint.h>
 
 //------------------------------------------------SETUP------------------------------------------------
-//-- KEYPAD
-void setupKeypad();                         // init
-char readKeypad();                          // checks for pressed keys on keypad
-int checkCols();                            // ussed internally by readKeypad()
-char lastKey = 'X';                         // used internally for debouncing
-
-//-- ADC SAMPLING
-
-//-- ADC CODE TO CELCIUS / FAHRENHEIT
-
-//-- SAMPLING TIMER
-
-//-- WINDOWED AVERAGING (x2)
 
 //-- I2C MASTER
-
-//-- RTC (I2C INFO + vars?)
+volatile uint8_t rx_byte_count = 0;
+volatile uint8_t rx_data[2];
+void setupI2C();
 
 //-- LM92 (I2C INFO + vars?)
+#define LM92_ADDR  0x48 
+volatile uint16_t temp_raw = 0;
 
-//-- PELTIER GPIO CONTROL
+//-- UART
+unsigned int position;
+char message[] = "Temp: 00000\n";  
+void setupUART(); 
+void printTemp();
 
-//-- LCD
-#define LCD_RS BIT0     // Register Select
-#define LCD_RW BIT1     // Read/Write
-#define LCD_E  BIT2     // Enable
-#define LCD_DATA P2OUT  // Data bus on Port 1
-char message[] = "LOCKED                          ";    // 33 characters long, 16 first row, 16 top row, \0
-void delay(unsigned int count);
-void lcd_enable_pulse();
-void lcd_write_command(unsigned char cmd);
-void lcd_write_data(unsigned char data);
-void lcd_init();
-void lcd_set_cursor(unsigned char address);
-void lcd_display_string(char *str);
-void lcd_display_message(char *str);
-void lcd_clear();
-
-//-- STATE MACHINE
 
 //----------------------------------------------END SETUP----------------------------------------------
 
@@ -62,29 +36,15 @@ int main(void) {
     P6OUT &= ~BIT6;
 
     //------------------------------------------------INITIALIZATIONS------------------------------------------------
-    //-- KEYPAD
-    setupKeypad();
-
-    //-- ADC SAMPLING
-
-    //-- ADC CODE TO CELCIUS / FAHRENHEIT
-
-    //-- SAMPLING TIMER
-
-    //-- WINDOWED AVERAGING (x2)
 
     //-- I2C MASTER
-
-    //-- RTC (I2C INFO + vars?)
+    setupI2C();
 
     //-- LM92 (I2C INFO + vars?)
 
-    //-- PELTIER GPIO CONTROL
+    //-- UART
+    setupUART();   
 
-    //-- LCD
-    lcd_init();            
-
-    //-- STATE MACHINE
 
     //----------------------------------------------END INITIALIZATIONS----------------------------------------------
 
@@ -95,6 +55,9 @@ int main(void) {
     // to activate previously configured port settings
     PMM_unlockLPM5();
 
+    // Take eUSCI_A1 out of software reset
+    UCA1CTLW0 &= ~UCSWRST;  
+
     //------------------------------------------------STATE MACHINE------------------------------------------------
     while(1)
     {
@@ -102,182 +65,110 @@ int main(void) {
         P1OUT ^= BIT0;
         P6OUT ^= BIT6;
 
+        // Step 1: Set pointer register to 0x00 (temp register)
+        UCB1CTLW0 |= UCTR | UCTXSTT;         // TX mode, generate START
+        while (!(UCB1IFG & UCTXIFG0));       // Wait for TX buffer ready
+        UCB1TXBUF = 0x00;                    // Send pointer byte
+        while (!(UCB1IFG & UCTXIFG0));       // Wait for it to finish
+        UCB1CTLW0 |= UCTXSTP;                // Generate STOP
+        while (UCB1CTLW0 & UCTXSTP);         // Wait for STOP to finish
+
+        // Step 2: Read temp
+        UCB1TBCNT = 2;
+        rx_byte_count = 0;
+        UCB1CTLW0 &= ~UCTR;                  // RX mode
+        UCB1CTLW0 |= UCTXSTT;                // Generate repeated START
+        while (UCB1CTLW0 & UCTXSTT);         // Wait for it to finish
+        while (UCB1CTLW0 & UCTXSTP);         // Wait for read to complete
+
+        temp_raw = (rx_data[0] << 8) | rx_data[1];
+
+        uint16_t val = temp_raw;
+
+        message[6] = (val / 10000) % 10 + '0';
+        message[7] = (val / 1000) % 10 + '0';
+        message[8] = (val / 100) % 10 + '0';
+        message[9] = (val / 10) % 10 + '0';
+        message[10] = val % 10 + '0';
+        
+        printTemp();
+
         // Delay
-        int i;
-        for(i=10000; i>0; i--);
+        __delay_cycles(1000000);
     }
     //----------------------------------------------END STATE MACHINE----------------------------------------------
 }
 
 //------------------------------------------------FUNCTIONS AND ISRS------------------------------------------------
-//-- KEYPAD
-void setupKeypad() {
-    
-    // columns as outputs on P4.4, P6.6, P6.5, P6.4 initialized to 0
-    P4DIR |= BIT4;
-    P6DIR |= BIT6 | BIT5 | BIT4;
-    P6OUT &= ~BIT4;
-    P6OUT &= ~(BIT6 | BIT5 | BIT4);
-
-    // rows as inputs pulled down internally on P6.3, P6.2, P6.1, P6.0
-    P6DIR &= ~(BIT3 | BIT2 | BIT1 | BIT0);     // inputs
-    P6REN |= BIT3 | BIT2 | BIT1 | BIT0;         // internal resistors
-	P6OUT &=~ BIT3 | BIT2 | BIT1 | BIT0;        // pull-downs
-
-}
-
-char readKeypad() {
-    // columns on P4.4, P6.6, P6.5, P6.4
-    // rows on P6.3, P6.2, P6.1, P6.0
-
-    char keys[4][4] = {
-        {'1', '2', '3', 'A'},
-        {'4', '5', '6', 'B'},
-        {'7', '8', '9', 'C'},
-        {'*', '0', '#', 'D'}
-    };
-
-    char pressed = 'X';
-
-    // check row 1
-    P4OUT |= BIT4;
-    int col = checkCols();
-    if (col!=-1) {
-        pressed = keys[0][col];
-    } 
-    P4OUT &= ~BIT4;
-
-    // check row 2
-    P6OUT |= BIT6;
-    col = checkCols();
-    if (col!=-1) {
-        pressed =  keys[1][col];
-    } 
-    P6OUT &= ~BIT6;
-
-    // check row 3
-    P6OUT |= BIT5;
-    col = checkCols();
-    if (col!=-1) {
-        pressed =  keys[2][col];
-    }
-    P6OUT &= ~BIT5;
-
-    // check row 4
-    P6OUT |= BIT4;
-    col = checkCols();
-    if (col!=-1) {
-        pressed =  keys[3][col];
-    }
-    P6OUT &= ~BIT4;
-
-    if (pressed != lastKey) {
-        lastKey = pressed;
-        return pressed;
-    } else {
-        return 'X';
-    }
-}
-
-int checkCols() {
-    // check inputs for rows on P6.3, P6.2, P6.1, P6.0 (rows 1-4)
-    if (P6IN & BIT3) {
-        return 0;
-    } else if (P6IN & BIT2) {
-        return 1;
-    } else if (P6IN & BIT1) {
-        return 2;
-    } else if (P6IN & BIT0) {
-        return 3;
-    } else {
-        return -1;
-    }
-}
-
-//-- ADC SAMPLING
-
-//-- ADC CODE TO CELCIUS / FAHRENHEIT
-
-//-- SAMPLING TIMER
-
-//-- WINDOWED AVERAGING (x2)
 
 //-- I2C MASTER
+void setupI2C(){
+    UCB1CTLW0 |= UCSWRST;
+    UCB1CTLW0 |= UCSSEL__SMCLK;
+    UCB1BRW = 10;
 
-//-- RTC (I2C INFO + vars?)
+    UCB1CTLW0 |= UCMODE_3 | UCMST;
+    UCB1CTLW1 |= UCASTP_2;          // Autostop on byte count
+
+    P4SEL1 &= ~(BIT6 | BIT7);
+    P4SEL0 |=  (BIT6 | BIT7);       // SDA=P4.6, SCL=P4.7
+
+    UCB1TBCNT = 2;                  // Expect 2 bytes
+    UCB1I2CSA = 0x48;               // LM92 address
+
+    UCB1CTLW0 &= ~UCTR;             // RX mode
+    UCB1CTLW0 &= ~UCSWRST;
+
+    UCB1IE |= UCRXIE0;              // Enable RX interrupt
+}
+
+#pragma vector = EUSCI_B1_VECTOR
+__interrupt void EUSCI_B1_ISR(void) {
+    switch (__even_in_range(UCB1IV, USCI_I2C_UCBIT9IFG)) {
+        case USCI_I2C_UCRXIFG0:
+            if (rx_byte_count < 2) {
+                rx_data[rx_byte_count++] = UCB1RXBUF;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 
 //-- LM92 (I2C INFO + vars?)
 
-//-- PELTIER GPIO CONTROL
+//-- UART
+void setupUART(){
+    UCA1CTLW0 |= UCSWRST;       // Reset
+    UCA1CTLW0 |= UCSSEL__SMCLK;  // Use 1M clock
+    UCA1BRW = 8;                // Set to low freq baud rate mode (divides by 8)
+    UCA1MCTLW |= 0xD600;        // Gets really close to 115200
 
-//-- LCD
-void delay(unsigned int count) {
-    while(count--) __delay_cycles(1000);
+    P4SEL1 &= ~BIT3;            // Config P4.3 to use UCATDX
+    P4SEL0 |= BIT3; 
 }
 
-void lcd_enable_pulse() {
-    P3OUT |= LCD_E;
-    delay(1);
-    P3OUT &= ~LCD_E;
+void printTemp(){
+    position = 0;
+    UCA1IE |= UCTXCPTIE;        // Enable interrupt
+    UCA1IFG &=~ UCTXCPTIFG;     // Clear flag
+    UCA1TXBUF = message[0];     // Start at first name
 }
 
-void lcd_write_command(unsigned char cmd) {
-    P3OUT &= ~LCD_RS;  // RS = 0 for command
-    P3OUT &= ~LCD_RW;  // RW = 0 for write
-    LCD_DATA = cmd;    // Write command to data bus
-    lcd_enable_pulse();
-    delay(1);         // Command execution delay
-}
-
-void lcd_write_data(unsigned char data) {
-    P3OUT |= LCD_RS;   // RS = 1 for data
-    P3OUT &= ~LCD_RW;  // RW = 0 for write
-    LCD_DATA = data;   // Write data to data bus
-    lcd_enable_pulse();
-    delay(1);         // Data write delay
-}
-
-void lcd_init() {
-    P3DIR |= LCD_RS | LCD_RW | LCD_E;
-    P2DIR |= 0xFF;   // Set Port 1 as output for data bus
-
-    delay(50);    // Power-on delay
-
-    lcd_write_command(0x38); // Function set: 8-bit, 2 lines, 5x8 dots
-    lcd_write_command(0x0C); // Display ON, Cursor OFF
-    lcd_clear();
-    lcd_write_command(0x06); // Entry mode set: Increment cursor
-}
-
-void lcd_set_cursor(unsigned char address) {
-    lcd_write_command(0x80 | address);
-    delay(1);
-}
-
-void lcd_display_string(char *str) {
-    while(*str) {
-        lcd_write_data(*str++);
+#pragma vector=EUSCI_A1_VECTOR
+__interrupt void ISR_EUSCI_A1(void)
+{
+    // If message sent or space is reached, disable TX interrupts
+    if(message[position+1] == '\0' || position >= sizeof(message) - 1) {
+        UCA1IE &=~ UCTXCPTIE;
     }
-}
-
-void lcd_clear(){
-    lcd_write_command(0x01); // Clear display
-    delay(1);             // Delay for clear command
-}
-
-void lcd_display_message(char *str ){ //Untested
-    int i;
-    lcd_set_cursor(0x00);
-    for (i=0; i<16; i++){
-        lcd_write_data(*str++);
+    else {
+        position++;                     // Inc position and transmit
+        UCA1TXBUF = message[position];
     }
-
-    lcd_set_cursor(0x40);
-    for (i=0; i<16; i++){
-        lcd_write_data(*str++);
-    }
+    UCA1IFG &=~ UCTXCPTIFG;
 }
 
-//-- STATE MACHINE
 
 //--------------------------------------------END FUNCTIONS AND ISRS--------------------------------------------
