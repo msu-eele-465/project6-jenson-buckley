@@ -6,7 +6,7 @@
 
 //-- I2C MASTER
 volatile uint8_t rx_byte_count = 0;
-volatile uint8_t rx_data[3];
+volatile uint8_t rx_data[19];
 void setupI2C();
 
 //-- DS3231 (I2C INFO + vars?)
@@ -63,20 +63,21 @@ int main(void) {
         P6OUT ^= BIT6;
 
         // Step 1: Set pointer register to 0x00 (Seconds Register)
-        UCB1CTLW0 |= UCTR | UCTXSTT;         // TX mode, generate START
-        while (!(UCB1IFG & UCTXIFG0));       // Wait for TX buffer ready
-        UCB1TXBUF = 0x00;                    // Send pointer byte
-        while (!(UCB1IFG & UCTXIFG0));       // Wait for it to finish
-        UCB1CTLW0 |= UCTXSTP;                // Generate STOP
-        while (UCB1CTLW0 & UCTXSTP);         // Wait for STOP to finish
+        //UCB1CTLW0 |= UCTR | UCTXSTT;         // TX mode, generate START
+        //while (!(UCB1IFG & UCTXIFG0));       // Wait for TX buffer ready
+        //UCB1TXBUF = 0x00;                    // Send pointer byte
+        //while (!(UCB1IFG & UCTXIFG0));       // Wait for it to finish
+        //UCB1CTLW0 |= UCTXSTP;                // Generate STOP
+        //while (UCB1CTLW0 & UCTXSTP);      // Wait for STOP to finish
 
-        // Step 2: Read 3 bytes (HH:MM:SS)
-        UCB1TBCNT = 3;
+        // Step 2: Read 19 bytes (HH:MM:SS)
         rx_byte_count = 0;
-        UCB1CTLW0 &= ~UCTR;                  // RX mode
-        UCB1CTLW0 |= UCTXSTT;                // Generate repeated START
-        while (UCB1CTLW0 & UCTXSTT);         // Wait for it to finish
-        while (UCB1CTLW0 & UCTXSTP);         // Wait until all 3 bytes received
+        UCB1TBCNT = 19;                      // Set byte count before starting transaction
+        UCB1CTLW0 &= ~UCTR;                 // RX mode
+        UCB1CTLW0 |= UCTXSTT;               // Generate repeated START
+        while (UCB1CTLW0 & UCTXSTT);        // Wait for START to finish
+        while (!(UCB1IFG & UCSTPIFG));      // Wait for STOP to be generated
+        UCB1IFG &= ~UCSTPIFG;               // Clear STOP flag
 
         // Write raw BCD bytes into message (2 hex characters each)
         message[6]  = "0123456789ABCDEF"[rx_data[2] >> 4];
@@ -121,7 +122,7 @@ void setupI2C(){
 __interrupt void EUSCI_B1_ISR(void) {
     switch (__even_in_range(UCB1IV, USCI_I2C_UCBIT9IFG)) {
         case USCI_I2C_UCRXIFG0:
-            if (rx_byte_count < 3) {
+            if (rx_byte_count < 19) {
                 rx_data[rx_byte_count++] = UCB1RXBUF;
             }
             break;
