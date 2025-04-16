@@ -37,13 +37,16 @@ unsigned int soon_temp_buffer_length = 0;   // Holds number of values to be used
 
 //-- I2C MASTER
 volatile uint8_t rx_byte_count = 0;         // Number of bytes received
-volatile uint8_t rx_data[2];                // Array to hold received bytes
+volatile uint8_t rx_data[19];               // Array to hold received bytes
 void setupI2C();                            // Setup I2C on P4.6 (SDA) and P4.7 (SCL)
 
 //-- RTC (I2C INFO + vars?)
+#define DS3231_ADDR  0x68
 char read_rtc_bool = 0;                     // Value toggeled so RTC is read every other sampling interrupt (every 1s)
 unsigned int readSeconds();                 // Read in seconds value from RTC
 unsigned int seconds = 0;                   // Number of seconds elapsed
+unsigned int last_seconds = 0;              // Value that was prevously read from seconds register
+unsigned int timer_reset = 1;               // Flag to reset the timer to 0 (automatically cleared)
 
 //-- LM92 (I2C INFO + vars?)
 #define LM92_ADDR  0x48 
@@ -167,7 +170,8 @@ int main(void) {
                 // HEAT
                 else if (key_val == 'A') {
                     updatePeltier("heat");                  // drive heat high and cool low
-                    seconds = 0;                            // reset 5min timer that resets the state
+                    seconds = 0;                            // reset rolling seconds count used for 5min timer that resets the state
+                    timer_reset = 1;                        // raise flag to reset RTC counter
                     memcpy(&message[0], "heat    ", 8);     // update LCD to display "heat"
                     lcd_display_message(message);           // display message
                 }
@@ -175,7 +179,8 @@ int main(void) {
                 // COOL
                 else if (key_val == 'B') {
                     updatePeltier("cool");                  // drive heat low and cool high
-                    seconds = 0;                            // reset 5min timer that resets the state
+                    seconds = 0;                            // reset rolling seconds count used for 5min timer that resets the state
+                    timer_reset = 1;                        // raise flag to reset RTC counter
                     memcpy(&message[0], "cool    ", 8);     // update LCD to display "cool"
                     lcd_display_message(message);           // display message
                 }
@@ -184,7 +189,8 @@ int main(void) {
                 else if (key_val == 'C') {
                     bang_bang_bool = 1;                     // enable bang-bang control
                     ambient_bool = 1;                       // setpoint is ambient temperature
-                    seconds = 0;                            // reset 5min timer that resets the state
+                    seconds = 0;                            // reset rolling seconds count used for 5min timer that resets the state
+                    timer_reset = 1;                        // raise flag to reset RTC counter
                     memcpy(&message[0], "match   ", 8);     // update LCD to display "match"
                     lcd_display_message(message);           // display message
                 }
@@ -247,20 +253,20 @@ int main(void) {
                         lcd_display_message(message);
                         bang_bang_bool = 1;                                 // enable bang-bang control
                         ambient_bool = 0;                                   // setpoint is user-set temperature
-                        seconds = 0;                                        // reset 5min timer that resets the state
+                        seconds = 0;                                        // reset rolling seconds count used for 5min timer that resets the state
+                        timer_reset = 1;                                    // raise flag to reset RTC counter
                     } else {
                         memcpy(&message[0], "off     ", 8);
                         lcd_display_message(message);
                         updatePeltier("off");                               // disable peltier
-                        bang_bang_bool = 0;                     // disable bang-bang control
+                        bang_bang_bool = 0;                                 // disable bang-bang control
                     }
                     state = 0;              // set state to free
                 }
             
             } else {
                 state = 0;
-                // TODO:
-                // drive heat low and cool low
+                updatePeltier("off");       // disable peltier
             }
         }
     }
@@ -425,10 +431,10 @@ __interrupt void ISR_TB0_CCR0(void)
     // read RTC seconds (every other interrupt)
     read_rtc_bool ^= 1;
     if (read_rtc_bool) {
-        // TODO: read RTC
-        seconds++;
+        seconds = readSeconds();
         if (seconds > 300) {
-            seconds = 0;                            // reset seconds
+            seconds = 0;                            // reset rolling seconds count used for 5min timer that resets the state
+            timer_reset = 1;                        // raise flag to reset RTC counter
             updatePeltier("off");                   // drive heat and cool pins low
             bang_bang_bool = 0;                     // disable bang-bang control
             memcpy(&message[0], "off     ", 8);     // update LCD to display "off"
@@ -534,11 +540,44 @@ __interrupt void EUSCI_B1_ISR(void) {
 //-- RTC (I2C INFO + vars?)
 unsigned int readSeconds() {
     // read in seconds value from RTC
-    return 0;
+    
+    // Step 1: Set pointer register to 0x00 (seconds register)
+    UCB1CTLW0 |= UCTR | UCTXSTT;        // TX mode, generate START
+    while (!(UCB1IFG & UCTXIFG0));      // Wait for TX buffer ready
+    UCB1TXBUF = 0x00;                   // Send pointer byte
+    while (!(UCB1IFG & UCTXIFG0));      // Wait for it to finish
+    UCB1CTLW0 |= UCTXSTP;               // Generate STOP
+    while (UCB1CTLW0 & UCTXSTP);        // Wait for STOP to finish
+
+    // Step 2: Read 19 bytes (HH:MM:SS) from RTC
+    UCB1I2CSA = DS3231_ADDR;            // RTC address
+    UCB1TBCNT = 19;                     // Set number of bytes to receive
+    rx_byte_count = 0;                  // Reset number of bytes received
+    UCB1CTLW0 &= ~UCTR;                 // RX mode
+    UCB1CTLW0 |= UCTXSTT;               // Generate repeated START
+    while (UCB1CTLW0 & UCTXSTT);        // Wait for it to finish
+    while (UCB1CTLW0 & UCTXSTP);        // Wait for read to complete
+
+    unsigned int cur_seconds = 10*((rx_data[0] & 0xF0) >> 4) + (rx_data[0] &0xF);   // current number in seconds register
+    
+    unsigned int delta;     // calculate change from last read
+
+    if (timer_reset == 1) {
+        timer_reset = 0;                                    // clear timer reset flag
+        delta = 0;                                          // no change in seconds counter
+    } else {
+        if (last_seconds > cur_seconds) {
+            delta = (cur_seconds) + (60-last_seconds);      // if register rolls over...
+        } else {
+            delta = cur_seconds - last_seconds;             // normal operation...
+        }
+    }
+    
+    last_seconds = cur_seconds;                             // update last seconds
+    return seconds + delta;                                 // return new seconds count
 }
 
 //-- LM92 (I2C INFO + vars?)
-// TODO:
 void readPlant() {
     // read value of LM92 using I2C into plant_val
     
@@ -550,7 +589,8 @@ void readPlant() {
     UCB1CTLW0 |= UCTXSTP;               // Generate STOP
     while (UCB1CTLW0 & UCTXSTP);        // Wait for STOP to finish
 
-    // Step 2: Read temp
+    // Step 2: Read temp from LM92
+    UCB1I2CSA = LM92_ADDR;              // LM92 address
     UCB1TBCNT = 2;                      // Set number of bytes to receive
     rx_byte_count = 0;                  // Reset number of bytes received
     UCB1CTLW0 &= ~UCTR;                 // RX mode
@@ -700,7 +740,7 @@ void lcd_clear(){
     delay(1);                   // Delay for clear command
 }
 
-void lcd_display_message(char *str ){   // Write all 32 characters to display - UNTESTED
+void lcd_display_message(char *str ){   // Write all 32 characters to display
     int i;
     lcd_set_cursor(0x00);
     for (i=0; i<16; i++){
