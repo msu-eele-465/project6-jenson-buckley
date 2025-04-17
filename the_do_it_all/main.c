@@ -51,7 +51,7 @@ unsigned int timer_reset = 1;               // Flag to reset the timer to 0 (aut
 //-- LM92 (I2C INFO + vars?)
 #define LM92_ADDR  0x48 
 void readPlant();                           // Read value of LM92 using I2C into plant_val
-volatile int plant_val;                     // readPlant() reads into this value
+int plant_val;                              // readPlant() reads into this value
 
 //-- PELTIER GPIO CONTROL
 void setupPeltier();                        // Initializes P4.0 (26 - heat) and P4.1 (25 - cool) as outputs driven low
@@ -97,13 +97,11 @@ int main(void) {
     // Stop watchdog timer
     WDT_A_hold(WDT_A_BASE);
 
-    // Set P1.0 LED
-    P1DIR |= BIT0;
-    P1OUT &= ~BIT0;
+    // Set P1.0 temp sampling toggle (pin 3)
+    // Set P1.1 RTC sampling toggle (pin 2)
+    P1DIR |= (BIT0 | BIT1);
+    P1OUT &= ~(BIT0 | BIT1);
 
-    // Set P6.6 LED
-    P6DIR |= BIT6;
-    P6OUT &= ~BIT6;
 
     //------------------------------------------------INITIALIZATIONS------------------------------------------------
     //-- KEYPAD
@@ -149,11 +147,27 @@ int main(void) {
     PMM_unlockLPM5();
 
     //------------------------------------------------STATE MACHINE------------------------------------------------
+
+    //-- Set RTC pointer to 00 (seconds)
+    //UCB1I2CSA = LM92_ADDR;              // LM92 address
+    //UCB1CTLW0 |= UCTR | UCTXSTT;        // TX mode, generate START
+    //while (!(UCB1IFG & UCTXIFG0));      // Wait for TX buffer ready
+    //UCB1TXBUF = 0x00;                   // Send pointer byte
+    //while (!(UCB1IFG & UCTXIFG0));      // Wait for it to finish
+    //UCB1CTLW0 |= UCTXSTP;               // Generate STOP
+    //while (UCB1CTLW0 & UCTXSTP);        // Wait for STOP to finish
+
+    //-- Set LM92 to 00 (temp)
+    UCB1I2CSA = LM92_ADDR;              // LM92 address
+    UCB1CTLW0 |= UCTR | UCTXSTT;        // TX mode, generate START
+    while (!(UCB1IFG & UCTXIFG0));      // Wait for TX buffer ready
+    UCB1TXBUF = 0x00;                   // Send pointer byte
+    while (!(UCB1IFG & UCTXIFG0));      // Wait for it to finish
+    UCB1CTLW0 |= UCTXSTP;               // Generate STOP
+    while (UCB1CTLW0 & UCTXSTP);        // Wait for STOP to finish
+
     while(1)
     {
-        // Toggle LEDs
-        P1OUT ^= BIT0;
-        P6OUT ^= BIT6;
 
         key_val = readKeypad();
         if (key_val != 'X') {
@@ -428,10 +442,15 @@ __interrupt void ISR_TB0_CCR0(void)
     // read plant temperature (I2C LM92)
     readPlant();
 
+    // toggle temp sample pin
+    P1OUT ^= BIT0;
+
     // read RTC seconds (every other interrupt)
     read_rtc_bool ^= 1;
     if (read_rtc_bool) {
-        seconds = readSeconds();
+        //seconds = readSeconds();
+        P1OUT ^= BIT1;                              // toggle rtc sample pin
+        seconds += 1;
         if (seconds > 300) {
             seconds = 0;                            // reset rolling seconds count used for 5min timer that resets the state
             timer_reset = 1;                        // raise flag to reset RTC counter
@@ -516,7 +535,7 @@ void setupI2C(){
     P4SEL0 |=  (BIT6 | BIT7);       // SDA=P4.6, SCL=P4.7
 
     UCB1TBCNT = 2;                  // Expect 2 bytes
-    UCB1I2CSA = LM92_ADDR;          // LM92 address
+    UCB1I2CSA = DS3231_ADDR;        // RTC address
 
     UCB1CTLW0 &= ~UCTR;             // RX mode
     UCB1CTLW0 &= ~UCSWRST;          // Take out of software reset
@@ -528,9 +547,7 @@ void setupI2C(){
 __interrupt void EUSCI_B1_ISR(void) {
     switch (__even_in_range(UCB1IV, USCI_I2C_UCBIT9IFG)) {
         case USCI_I2C_UCRXIFG0:
-            if (rx_byte_count < 2) {
-                rx_data[rx_byte_count++] = UCB1RXBUF;
-            }
+            rx_data[rx_byte_count++] = UCB1RXBUF;
             break;
         default:
             break;
@@ -542,15 +559,9 @@ unsigned int readSeconds() {
     // read in seconds value from RTC
     
     // Step 1: Set pointer register to 0x00 (seconds register)
-    UCB1CTLW0 |= UCTR | UCTXSTT;        // TX mode, generate START
-    while (!(UCB1IFG & UCTXIFG0));      // Wait for TX buffer ready
-    UCB1TXBUF = 0x00;                   // Send pointer byte
-    while (!(UCB1IFG & UCTXIFG0));      // Wait for it to finish
-    UCB1CTLW0 |= UCTXSTP;               // Generate STOP
-    while (UCB1CTLW0 & UCTXSTP);        // Wait for STOP to finish
+    UCB1I2CSA = DS3231_ADDR;            // RTC address
 
     // Step 2: Read 19 bytes (HH:MM:SS) from RTC
-    UCB1I2CSA = DS3231_ADDR;            // RTC address
     UCB1TBCNT = 19;                     // Set number of bytes to receive
     rx_byte_count = 0;                  // Reset number of bytes received
     UCB1CTLW0 &= ~UCTR;                 // RX mode
@@ -558,7 +569,7 @@ unsigned int readSeconds() {
     while (UCB1CTLW0 & UCTXSTT);        // Wait for it to finish
     while (UCB1CTLW0 & UCTXSTP);        // Wait for read to complete
 
-    unsigned int cur_seconds = 10*((rx_data[0] & 0xF0) >> 4) + (rx_data[0] &0xF);   // current number in seconds register
+    unsigned int cur_seconds = 10*((rx_data[11] & 0xF0) >> 4) + (rx_data[11] &0xF);   // current number in seconds register
     
     unsigned int delta;     // calculate change from last read
 
@@ -580,26 +591,32 @@ unsigned int readSeconds() {
 //-- LM92 (I2C INFO + vars?)
 void readPlant() {
     // read value of LM92 using I2C into plant_val
-    
+    __disable_interrupt();
+
     // Step 1: Set pointer register to 0x00 (temp register)
-    UCB1CTLW0 |= UCTR | UCTXSTT;        // TX mode, generate START
-    while (!(UCB1IFG & UCTXIFG0));      // Wait for TX buffer ready
-    UCB1TXBUF = 0x00;                   // Send pointer byte
-    while (!(UCB1IFG & UCTXIFG0));      // Wait for it to finish
-    UCB1CTLW0 |= UCTXSTP;               // Generate STOP
-    while (UCB1CTLW0 & UCTXSTP);        // Wait for STOP to finish
+    UCB1I2CSA = LM92_ADDR;              // LM92 address
 
     // Step 2: Read temp from LM92
-    UCB1I2CSA = LM92_ADDR;              // LM92 address
     UCB1TBCNT = 2;                      // Set number of bytes to receive
     rx_byte_count = 0;                  // Reset number of bytes received
     UCB1CTLW0 &= ~UCTR;                 // RX mode
     UCB1CTLW0 |= UCTXSTT;               // Generate repeated START
-    while (UCB1CTLW0 & UCTXSTT);        // Wait for it to finish
-    while (UCB1CTLW0 & UCTXSTP);        // Wait for read to complete
+    //while (UCB1CTLW0 & UCTXSTT);        // Wait for it to finish
+    //while (UCB1CTLW0 & UCTXSTP);        // Wait for read to complete
+
+    UCB1CTLW0 |= UCTXSTT;   // generate start condition
+
+    while (!(UCB1IFG & UCSTPIFG)) { // wait for stop 
+        if (UCB1IFG & UCRXIFG0) {       // if RX flag (data in buffer)
+            rx_data[rx_byte_count] = UCB1RXBUF;   // read from buffer (auto clears RX flag)
+            rx_byte_count++;
+        }
+    }
+    UCB1IFG &=~ UCSTPIFG;   // clear stop
 
     plant_val = (rx_data[0] << 5) | (rx_data[1] >> 3);
 
+    __enable_interrupt();
     return;
 }
 

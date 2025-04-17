@@ -63,12 +63,12 @@ int main(void) {
         P6OUT ^= BIT6;
 
         // Step 1: Set pointer register to 0x00 (Seconds Register)
-        //UCB1CTLW0 |= UCTR | UCTXSTT;         // TX mode, generate START
-        //while (!(UCB1IFG & UCTXIFG0));       // Wait for TX buffer ready
-        //UCB1TXBUF = 0x00;                    // Send pointer byte
-        //while (!(UCB1IFG & UCTXIFG0));       // Wait for it to finish
-        //UCB1CTLW0 |= UCTXSTP;                // Generate STOP
-        //while (UCB1CTLW0 & UCTXSTP);      // Wait for STOP to finish
+        UCB1CTLW0 |= UCTR | UCTXSTT;         // TX mode, generate START
+        while (!(UCB1IFG & UCTXIFG0));       // Wait for TX buffer ready
+        UCB1TXBUF = 0x00;                    // Send pointer byte
+        while (!(UCB1IFG & UCTXIFG0));       // Wait for it to finish
+        UCB1CTLW0 |= UCTXSTP;                // Generate STOP
+        while (UCB1CTLW0 & UCTXSTP);      // Wait for STOP to finish
 
         // Step 2: Read 19 bytes (HH:MM:SS)
         rx_byte_count = 0;
